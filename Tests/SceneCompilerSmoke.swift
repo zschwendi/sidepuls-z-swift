@@ -43,20 +43,30 @@ enum SceneCompilerSmoke {
         assertColorPrograms(now: now, compiler: compiler)
         assertLegacyStyleDecoding()
 
-        let openingLid = SystemLightingScenes.lidTransition(ledCount: 8, closing: false)
-        let closingLid = SystemLightingScenes.lidTransition(ledCount: 8, closing: true)
-        precondition(openingLid.program.hasPrefix("brightness 255\noff\n"))
-        precondition(openingLid.program.contains("0:#FFFFFF 80ms none"))
-        precondition(openingLid.program.contains("7:#FFFFFF 80ms none 385ms"))
-        precondition(openingLid.program.contains("#FFFFFF 200ms none"), "Opening must visibly hold full white")
-        precondition(openingLid.program.contains("off 240ms cosine"))
-        precondition(closingLid.program.hasPrefix("brightness 255\n#FFFFFF 160ms cosine"))
-        precondition(closingLid.program.contains("#FFFFFF 120ms none"), "Closing must visibly hold full white")
-        precondition(closingLid.program.contains("7:#000000 170ms cosine"))
-        precondition(closingLid.program.contains("0:#000000 170ms cosine 385ms"))
-        precondition(closingLid.program.contains("off 100ms none"))
-        precondition(openingLid.duration < 1 && closingLid.duration < 1, "Lid animation must restore without a long wait")
-        precondition(openingLid.program.utf8.count <= 512 && closingLid.program.utf8.count <= 512)
+        precondition(SystemLightingScenes.illuminatedLEDCount(chargeFraction: 0, ledCount: 8) == 1)
+        precondition(SystemLightingScenes.illuminatedLEDCount(chargeFraction: 0.125, ledCount: 8) == 1)
+        precondition(SystemLightingScenes.illuminatedLEDCount(chargeFraction: 0.1875, ledCount: 8) == 2)
+        precondition(SystemLightingScenes.illuminatedLEDCount(chargeFraction: 0.9374, ledCount: 8) == 7)
+        precondition(SystemLightingScenes.illuminatedLEDCount(chargeFraction: 0.9375, ledCount: 8) == 8)
+
+        let batteryGauge = SystemLightingScenes.batteryGauge(chargeFraction: 0.45, ledCount: 8)
+        precondition(batteryGauge.program.hasPrefix("brightness 255\noff\n"))
+        precondition(batteryGauge.program.contains("0:#FFFFFF 120ms cosine"))
+        precondition(batteryGauge.program.contains("3:#FFFFFF 120ms cosine 378ms"))
+        precondition(batteryGauge.program.contains("3:#FFFFFF 1s none"))
+        precondition(batteryGauge.program.contains("4:#000000 1s none"), "Unfilled battery LEDs must remain off")
+        precondition(batteryGauge.duration == 1.5, "Battery gauge must animate for 0.5s and hold for 1s")
+        precondition(batteryGauge.program.utf8.count <= 512)
+
+        let lowBattery = SystemLightingScenes.lowBatteryAlert(ledCount: 8)
+        precondition(lowBattery.program.hasPrefix("brightness 255\noff\n"))
+        precondition(lowBattery.program.contains("0:#30D158 120ms cosine"))
+        precondition(lowBattery.program.contains("1:#30D158 120ms cosine 380ms"))
+        precondition(lowBattery.program.contains("2:#260000 500ms cosine"))
+        precondition(lowBattery.program.contains("1:#30D158 1s none"))
+        precondition(lowBattery.program.contains("7:#260000 1s none"))
+        precondition(lowBattery.duration == 1.5)
+        precondition(lowBattery.program.utf8.count <= 512)
 
         assertProLayout(agentCount: 1, expectedOccupancy: [8], now: now, compiler: compiler)
         assertProLayout(agentCount: 2, expectedOccupancy: [4, 4], now: now, compiler: compiler)
@@ -152,7 +162,7 @@ enum SceneCompilerSmoke {
         if ProcessInfo.processInfo.environment["SIDEPULSE_DUMP_PROGRAMS"] == "1" {
             dumpFirmwarePrograms(now: now, compiler: compiler)
         }
-        print("Scene compiler smoke passed: restored pulse/breathe, full-white lid hold, motion geometry, color modes, adaptive stable layouts")
+        print("Scene compiler smoke passed: battery lid gauge, low-battery alert, motion geometry, color modes, adaptive stable layouts")
     }
 
     private static func dumpFirmwarePrograms(now: Date, compiler: LightingSceneCompiler) {
@@ -173,10 +183,12 @@ enum SceneCompilerSmoke {
                 }
             }
         }
-        for closing in [false, true] {
-            let scene = SystemLightingScenes.lidTransition(ledCount: 8, closing: closing)
-            print("lid-\(closing ? "close" : "open")\t\(Data(scene.program.utf8).base64EncodedString())")
+        for chargeFraction in [0.12, 0.45, 0.94] {
+            let scene = SystemLightingScenes.batteryGauge(chargeFraction: chargeFraction, ledCount: 8)
+            print("battery-\(chargeFraction)\t\(Data(scene.program.utf8).base64EncodedString())")
         }
+        let alert = SystemLightingScenes.lowBatteryAlert(ledCount: 8)
+        print("battery-low\t\(Data(alert.program.utf8).base64EncodedString())")
     }
 
     private static func assertMotionPrograms(now: Date, compiler: LightingSceneCompiler) {

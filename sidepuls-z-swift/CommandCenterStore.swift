@@ -52,6 +52,7 @@ final class CommandCenterStore {
             )
         }
     var device = DeviceState()
+    var batteryState: BatteryState?
     var lidIsClosed: Bool?
     var lastLidTransitionAt: Date?
     var scene = CompiledScene(program: "", slots: [])
@@ -68,6 +69,8 @@ final class CommandCenterStore {
     @ObservationIgnored private var runtime: NativeAgentRuntime?
     @ObservationIgnored private var hardware: SidePulseHardwareController?
     @ObservationIgnored private var lidMonitor: LidStateMonitor?
+    @ObservationIgnored private var batteryMonitor: BatteryStateMonitor?
+    @ObservationIgnored private var lastLowBatteryAlertAt: Date?
     @ObservationIgnored private var codexActivationObserver: NSObjectProtocol?
     @ObservationIgnored private var isShowingPreviewData = true
 
@@ -253,6 +256,14 @@ final class CommandCenterStore {
         self.hardware = hardware
         hardware.start()
 
+        let batteryMonitor = BatteryStateMonitor { [weak self] state in
+            Task { @MainActor [weak self] in
+                self?.handleBatteryUpdate(state)
+            }
+        }
+        self.batteryMonitor = batteryMonitor
+        batteryMonitor.start()
+
         let lidMonitor = LidStateMonitor { [weak self] isClosed, isTransition in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -262,9 +273,9 @@ final class CommandCenterStore {
                 if !isClosed {
                     self.runtime?.acknowledgeCompleted()
                 }
-                let transition = SystemLightingScenes.lidTransition(
-                    ledCount: self.device.ledCount,
-                    closing: isClosed
+                let transition = SystemLightingScenes.batteryGauge(
+                    chargeFraction: self.batteryState?.chargeFraction ?? 1,
+                    ledCount: self.device.ledCount
                 )
                 self.hardware?.preview(
                     program: transition.program,
@@ -304,6 +315,20 @@ final class CommandCenterStore {
                 self?.runtime?.acknowledgeCompleted()
             }
         }
+    }
+
+    private func handleBatteryUpdate(_ state: BatteryState?) {
+        if batteryState != state { batteryState = state }
+        guard let state, state.isLowAndDischarging else {
+            lastLowBatteryAlertAt = nil
+            return
+        }
+
+        let now = Date.now
+        guard lastLowBatteryAlertAt.map({ now.timeIntervalSince($0) >= 15 }) ?? true else { return }
+        lastLowBatteryAlertAt = now
+        let alert = SystemLightingScenes.lowBatteryAlert(ledCount: device.ledCount)
+        hardware?.preview(program: alert.program, duration: alert.duration)
     }
 
     private func syncHardwareOutput() {

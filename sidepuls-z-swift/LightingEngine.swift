@@ -414,50 +414,73 @@ struct TimedLightingScene: Equatable, Sendable {
 }
 
 enum SystemLightingScenes {
-    static func lidTransition(ledCount: Int, closing: Bool) -> TimedLightingScene {
+    private static let fillMilliseconds = 500
+    private static let holdMilliseconds = 1_000
+
+    static func illuminatedLEDCount(chargeFraction: Double, ledCount: Int) -> Int {
         let count = max(1, min(8, ledCount))
-        let indices = closing ? Array((0..<count).reversed()) : Array(0..<count)
-        let staggerMilliseconds = 55
-        let sweep: [String]
-        let lines: [String]
-        let durationMilliseconds: Int
+        let normalized = max(0, min(1, chargeFraction))
+        let step = 1 / Double(count)
+        let rounded = Int(floor((normalized + (step / 2)) / step))
+        return max(1, min(count, rounded))
+    }
 
-        if closing {
-            let fadeMilliseconds = 170
-            sweep = indices.enumerated().map { position, index in
-                let delay = position * staggerMilliseconds
-                return delay == 0
-                    ? "\(index):#000000 \(fadeMilliseconds)ms cosine"
-                    : "\(index):#000000 \(fadeMilliseconds)ms cosine \(delay)ms"
-            }
-            lines = [
-                "brightness 255",
-                "#FFFFFF 160ms cosine",
-                "#FFFFFF 120ms none",
-                sweep.joined(separator: ";"),
-                "off 100ms none",
-            ]
-            durationMilliseconds = 160 + 120 + fadeMilliseconds + ((count - 1) * staggerMilliseconds) + 100
-        } else {
-            let fillMilliseconds = 80
-            sweep = indices.enumerated().map { position, index in
-                let delay = position * staggerMilliseconds
-                return delay == 0
-                    ? "\(index):#FFFFFF \(fillMilliseconds)ms none"
-                    : "\(index):#FFFFFF \(fillMilliseconds)ms none \(delay)ms"
-            }
-            lines = [
-                "brightness 255",
-                "off",
-                sweep.joined(separator: ";"),
-                "#FFFFFF 200ms none",
-                "off 240ms cosine",
-            ]
-            durationMilliseconds = fillMilliseconds + ((count - 1) * staggerMilliseconds) + 200 + 240
+    static func batteryGauge(chargeFraction: Double, ledCount: Int) -> TimedLightingScene {
+        let count = max(1, min(8, ledCount))
+        let illuminated = illuminatedLEDCount(chargeFraction: chargeFraction, ledCount: count)
+        let sweep = fillSegments(indices: Array(0..<illuminated), color: "#FFFFFF")
+        let hold = (0..<count).map { index in
+            let color = index < illuminated ? "#FFFFFF" : "#000000"
+            return "\(index):\(color) \(holdMilliseconds / 1_000)s none"
         }
+        let program = [
+            "brightness 255",
+            "off",
+            sweep.joined(separator: ";"),
+            hold.joined(separator: ";"),
+        ].joined(separator: "\n")
+        precondition(program.utf8.count <= 512, "Battery gauge exceeds the firmware limit")
+        return TimedLightingScene(
+            program: program,
+            duration: Double(fillMilliseconds + holdMilliseconds) / 1_000
+        )
+    }
 
-        let program = lines.joined(separator: "\n")
-        let duration = Double(durationMilliseconds) / 1_000 + 0.04
-        return TimedLightingScene(program: program, duration: duration)
+    static func lowBatteryAlert(ledCount: Int) -> TimedLightingScene {
+        let count = max(1, min(8, ledCount))
+        let greenCount = min(2, count)
+        var animation = fillSegments(indices: Array(0..<greenCount), color: "#30D158")
+        animation += (greenCount..<count).map {
+            "\($0):#260000 \(fillMilliseconds)ms cosine"
+        }
+        let hold = (0..<count).map { index in
+            let color = index < greenCount ? "#30D158" : "#260000"
+            return "\(index):\(color) \(holdMilliseconds / 1_000)s none"
+        }
+        let program = [
+            "brightness 255",
+            "off",
+            animation.joined(separator: ";"),
+            hold.joined(separator: ";"),
+        ].joined(separator: "\n")
+        precondition(program.utf8.count <= 512, "Low-battery alert exceeds the firmware limit")
+        return TimedLightingScene(
+            program: program,
+            duration: Double(fillMilliseconds + holdMilliseconds) / 1_000
+        )
+    }
+
+    private static func fillSegments(indices: [Int], color: String) -> [String] {
+        guard !indices.isEmpty else { return [] }
+        let transitionMilliseconds = indices.count == 1 ? fillMilliseconds : 120
+        let staggerMilliseconds = indices.count == 1
+            ? 0
+            : (fillMilliseconds - transitionMilliseconds) / (indices.count - 1)
+        return indices.enumerated().map { position, index in
+            let delay = position * staggerMilliseconds
+            return delay == 0
+                ? "\(index):\(color) \(transitionMilliseconds)ms cosine"
+                : "\(index):\(color) \(transitionMilliseconds)ms cosine \(delay)ms"
+        }
     }
 }

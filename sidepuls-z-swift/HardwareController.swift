@@ -1,5 +1,6 @@
 import Foundation
 import IOKit
+import IOKit.ps
 
 final class SidePulseHardwareController: @unchecked Sendable {
     typealias UpdateHandler = @Sendable (DeviceState) -> Void
@@ -207,6 +208,74 @@ final class LidStateMonitor: @unchecked Sendable {
             0
         )?.takeRetainedValue()
         return value as? Bool
+    }
+}
+
+struct BatteryState: Equatable, Sendable {
+    var chargeFraction: Double
+    var isCharging: Bool
+    var isExternallyPowered: Bool
+
+    var isLowAndDischarging: Bool {
+        chargeFraction <= 0.25 && !isCharging && !isExternallyPowered
+    }
+}
+
+final class BatteryStateMonitor: @unchecked Sendable {
+    typealias UpdateHandler = @Sendable (BatteryState?) -> Void
+
+    private let queue = DispatchQueue(label: "io.sidepulse.battery-state-monitor", qos: .utility)
+    private let onUpdate: UpdateHandler
+    private var timer: DispatchSourceTimer?
+
+    init(onUpdate: @escaping UpdateHandler) {
+        self.onUpdate = onUpdate
+    }
+
+    func start() {
+        queue.async { [weak self] in
+            guard let self, timer == nil else { return }
+            sampleLocked()
+            let source = DispatchSource.makeTimerSource(queue: queue)
+            source.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(100))
+            source.setEventHandler { [weak self] in self?.sampleLocked() }
+            timer = source
+            source.resume()
+        }
+    }
+
+    func stop() {
+        queue.sync {
+            timer?.cancel()
+            timer = nil
+        }
+    }
+
+    private func sampleLocked() {
+        onUpdate(Self.currentState())
+    }
+
+    static func currentState() -> BatteryState? {
+        let snapshot = IOPSCopyPowerSourcesInfo().takeRetainedValue()
+        let sources = IOPSCopyPowerSourcesList(snapshot).takeRetainedValue() as [CFTypeRef]
+        for source in sources {
+            guard
+                let description = IOPSGetPowerSourceDescription(snapshot, source)?.takeUnretainedValue()
+                    as? [String: Any],
+                description[kIOPSTypeKey] as? String == kIOPSInternalBatteryType,
+                let current = (description[kIOPSCurrentCapacityKey] as? NSNumber)?.doubleValue,
+                let maximum = (description[kIOPSMaxCapacityKey] as? NSNumber)?.doubleValue,
+                maximum > 0
+            else { continue }
+
+            let powerSource = description[kIOPSPowerSourceStateKey] as? String
+            return BatteryState(
+                chargeFraction: max(0, min(1, current / maximum)),
+                isCharging: (description[kIOPSIsChargingKey] as? NSNumber)?.boolValue ?? false,
+                isExternallyPowered: powerSource == kIOPSACPowerValue
+            )
+        }
+        return nil
     }
 }
 
