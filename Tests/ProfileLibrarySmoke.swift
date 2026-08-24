@@ -17,7 +17,14 @@ enum ProfileLibrarySmoke {
         custom.name = "Custom Pulse"
 
         let encodedProfiles = try JSONEncoder().encode([builtIn, custom])
-        let profiles = try JSONSerialization.jsonObject(with: encodedProfiles)
+        var profiles = try require(
+            try JSONSerialization.jsonObject(with: encodedProfiles) as? [[String: Any]]
+        )
+        var styles = try require(profiles[0]["styles"] as? [[String: Any]])
+        var legacyProgress = try require(styles.first(where: { $0["state"] as? String == "working" }))
+        legacyProgress["state"] = "progress"
+        styles.append(legacyProgress)
+        profiles[0]["styles"] = styles
         let legacyLibrary: [String: Any] = [
             "schemaVersion": 5,
             "profiles": profiles,
@@ -26,10 +33,13 @@ enum ProfileLibrarySmoke {
         defaults.set(try JSONSerialization.data(withJSONObject: legacyLibrary), forKey: "sidepulse.profile-library.v1")
 
         let migrated = try require(ProfileLibrary.load(from: defaults))
-        precondition(migrated.schemaVersion == 6)
+        precondition(migrated.schemaVersion == 7)
         precondition(migrated.profiles.first(where: { $0.id == builtIn.id })?.style(for: .working).motion == .breathe)
         precondition(migrated.profiles.first(where: { $0.id == custom.id })?.style(for: .working).motion == .pulse)
-        print("Profile library smoke passed: Pulse Wave rollback restores built-ins and preserves custom Pulse")
+        precondition(
+            migrated.profiles.first(where: { $0.id == builtIn.id })?.styles.filter { $0.state == .working }.count == 1
+        )
+        print("Profile library smoke passed: legacy Progress collapses into Thinking without duplicate styles")
     }
 
     private static func require<T>(_ value: T?) throws -> T {

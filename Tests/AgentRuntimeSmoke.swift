@@ -60,13 +60,7 @@ enum AgentRuntimeSmoke {
 
         let probe = RuntimeProbe()
         let detected = DispatchSemaphore(value: 0)
-        let runtime = NativeAgentRuntime(
-            policy: AgentRuntimePolicy(
-                completedHoldSeconds: 10,
-                postToolHoldSeconds: 0.1,
-                toolTimeoutSeconds: 0.1
-            )
-        ) { agents, _, integrations in
+        let runtime = NativeAgentRuntime { agents, _, integrations in
             probe.record(agents: agents, integrations: integrations)
             let states = Dictionary(uniqueKeysWithValues: agents.map { ($0.sessionID, $0.state) })
             if states[completedID] == .completed,
@@ -92,7 +86,7 @@ enum AgentRuntimeSmoke {
         )
         precondition(
             agents.contains(where: { $0.sessionID == toolID && $0.state == .toolRunning }),
-            "A long tool call must not become an inferred failure"
+            "A tool call must stay a tool until an explicit output event"
         )
         precondition(
             agents.contains(where: { $0.sessionID == abortedID && $0.state == .error }),

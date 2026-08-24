@@ -25,7 +25,7 @@ enum SceneCompilerSmoke {
         precondition(profile.style(for: .completed).motion == .solid)
         precondition(profile.style(for: .error).colorHex == "#FF3B30")
         precondition(profile.style(for: .error).motion == .solid)
-        precondition(profile.completedHoldSeconds == 0, "Success visibility is acknowledgement-driven, not timer-driven")
+        precondition(!AgentState.allCases.contains(where: { $0.rawValue == "progress" }))
 
         var breatheAllocator = StableSlotAllocator()
         let breathe = compiler.compile(

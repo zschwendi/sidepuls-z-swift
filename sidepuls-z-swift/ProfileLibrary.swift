@@ -1,7 +1,7 @@
 import Foundation
 
 struct SavedProfileLibrary: Codable, Sendable {
-    var schemaVersion = 6
+    var schemaVersion = 7
     var profiles: [LightingProfile]
     var selectedProfileID: UUID
 }
@@ -12,7 +12,7 @@ enum ProfileLibrary {
     static func load(from defaults: UserDefaults = .standard) -> SavedProfileLibrary? {
         guard let data = defaults.data(forKey: storageKey) else { return nil }
         guard var library = try? JSONDecoder().decode(SavedProfileLibrary.self, from: data) else { return nil }
-        guard library.schemaVersion < 6 else { return library }
+        guard library.schemaVersion < 7 else { return library }
 
         let builtIns = [
             LightingProfile.commandCenter,
@@ -24,9 +24,7 @@ enum ProfileLibrary {
             if library.schemaVersion < 2 {
                 library.profiles[index].strategy = .adaptiveOccupancy
             }
-            library.profiles[index].completedHoldSeconds = builtIn.completedHoldSeconds
-            library.profiles[index].postToolHoldSeconds = builtIn.postToolHoldSeconds
-            for state in [AgentState.working, .toolRunning, .progress, .waiting, .error, .completed] {
+            for state in [AgentState.working, .toolRunning, .waiting, .error, .completed] {
                 library.profiles[index].updateStyle(builtIn.style(for: state))
             }
         }
@@ -35,14 +33,22 @@ enum ProfileLibrary {
             for profileIndex in library.profiles.indices where builtInIDs.contains(library.profiles[profileIndex].id) {
                 for styleIndex in library.profiles[profileIndex].styles.indices {
                     let state = library.profiles[profileIndex].styles[styleIndex].state
-                    if [.idle, .working, .toolRunning, .progress].contains(state),
+                    if [.idle, .working, .toolRunning].contains(state),
                        library.profiles[profileIndex].styles[styleIndex].motion == .pulse {
                         library.profiles[profileIndex].styles[styleIndex].motion = .breathe
                     }
                 }
             }
         }
-        library.schemaVersion = 6
+        if library.schemaVersion < 7 {
+            for profileIndex in library.profiles.indices {
+                var seenStates = Set<String>()
+                library.profiles[profileIndex].styles = library.profiles[profileIndex].styles.filter {
+                    seenStates.insert($0.state.rawValue).inserted
+                }
+            }
+        }
+        library.schemaVersion = 7
         save(
             profiles: library.profiles,
             selectedProfileID: library.selectedProfileID,

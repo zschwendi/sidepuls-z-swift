@@ -140,7 +140,6 @@ final class CommandCenterStore {
         allocator.reset()
         recompile()
         persistProfiles()
-        runtime?.updatePolicy(runtimePolicy)
     }
 
     func updateSelectedProfile(_ update: (inout LightingProfile) -> Void) {
@@ -150,7 +149,6 @@ final class CommandCenterStore {
         if profiles[index].strategy != previousStrategy { allocator.reset() }
         recompile()
         persistProfiles()
-        runtime?.updatePolicy(runtimePolicy)
     }
 
     func updateStyle(_ style: StateLightStyle) {
@@ -235,14 +233,6 @@ final class CommandCenterStore {
         )
     }
 
-    private var runtimePolicy: AgentRuntimePolicy {
-        AgentRuntimePolicy(
-            completedHoldSeconds: selectedProfile.completedHoldSeconds,
-            postToolHoldSeconds: selectedProfile.postToolHoldSeconds,
-            toolTimeoutSeconds: selectedProfile.toolTimeoutSeconds
-        )
-    }
-
     private func startNativeRuntime() {
         let hardware = SidePulseHardwareController { [weak self] device in
             Task { @MainActor [weak self] in
@@ -282,7 +272,7 @@ final class CommandCenterStore {
         self.lidMonitor = lidMonitor
         lidMonitor.start()
 
-        let runtime = NativeAgentRuntime(policy: runtimePolicy) { [weak self] agents, message, integrations in
+        let runtime = NativeAgentRuntime { [weak self] agents, message, integrations in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if self.isShowingPreviewData {

@@ -1,12 +1,6 @@
 import Darwin
 import Foundation
 
-struct AgentRuntimePolicy: Sendable {
-    var completedHoldSeconds: TimeInterval
-    var postToolHoldSeconds: TimeInterval
-    var toolTimeoutSeconds: TimeInterval
-}
-
 struct CompletionAcknowledgements: Codable, Sendable {
     private(set) var acknowledgedAt: [String: Date] = [:]
 
@@ -84,14 +78,12 @@ final class NativeAgentRuntime: @unchecked Sendable {
     private var threadNames: [String: String] = [:]
     private var threadIndexModification: Date?
     private var codexMetadataCache: [URL: [String: Any]] = [:]
-    private var policy: AgentRuntimePolicy
     private var ownsSocket = false
     private var lastLatestModification: Date?
     private var lastPublishedSignature = ""
     private let onUpdate: UpdateHandler
 
-    init(policy: AgentRuntimePolicy, onUpdate: @escaping UpdateHandler) {
-        self.policy = policy
+    init(onUpdate: @escaping UpdateHandler) {
         self.onUpdate = onUpdate
 
         let environment = ProcessInfo.processInfo.environment
@@ -133,13 +125,6 @@ final class NativeAgentRuntime: @unchecked Sendable {
             server?.stop()
             server = nil
             ownsSocket = false
-        }
-    }
-
-    func updatePolicy(_ policy: AgentRuntimePolicy) {
-        queue.async { [weak self] in
-            self?.policy = policy
-            self?.publishLocked(force: true)
         }
     }
 
@@ -446,7 +431,7 @@ private extension NativeAgentRuntime {
             let state: AgentState
             switch status {
             case "needs_input", "waiting": state = .waiting
-            case "pending", "queued", "starting": state = .progress
+            case "pending", "queued", "starting": state = .working
             default: state = .working
             }
             active[key] = AgentSession(
@@ -1028,7 +1013,7 @@ private extension AgentState {
         case "idle_ready": self = .idle
         case "working": self = .working
         case "tool_running": self = .toolRunning
-        case "long_task_progress": self = .progress
+        case "long_task_progress": self = .working
         case "waiting_for_input": self = .waiting
         case "blocked_error": self = .error
         case "completed": self = .completed
@@ -1041,7 +1026,6 @@ private extension AgentState {
         case .idle: "idle_ready"
         case .working: "working"
         case .toolRunning: "tool_running"
-        case .progress: "long_task_progress"
         case .waiting: "waiting_for_input"
         case .error: "blocked_error"
         case .completed: "completed"

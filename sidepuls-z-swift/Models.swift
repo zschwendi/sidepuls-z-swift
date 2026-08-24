@@ -45,15 +45,14 @@ struct AgentIntegrationStatus: Identifiable, Equatable, Sendable {
 }
 
 enum AgentState: String, Codable, CaseIterable, Identifiable, Sendable {
-    case idle, working, toolRunning, progress, waiting, error, completed
+    case idle, working, toolRunning, waiting, error, completed
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .idle: "Idle"
         case .working: "Thinking"
-        case .toolRunning: "Waiting on Tool"
-        case .progress: "Long Progress"
+        case .toolRunning: "Tool Running"
         case .waiting: "Needs Approval"
         case .error: "Error / Blocked"
         case .completed: "Done"
@@ -65,7 +64,6 @@ enum AgentState: String, Codable, CaseIterable, Identifiable, Sendable {
         case .idle: "moon.stars"
         case .working: "brain.head.profile"
         case .toolRunning: "hammer.fill"
-        case .progress: "chart.line.uptrend.xyaxis"
         case .waiting: "hand.raised.fill"
         case .error: "exclamationmark.triangle.fill"
         case .completed: "checkmark.circle.fill"
@@ -77,11 +75,30 @@ enum AgentState: String, Codable, CaseIterable, Identifiable, Sendable {
         case .error: 0
         case .waiting: 1
         case .toolRunning: 2
-        case .progress: 3
-        case .working: 4
-        case .completed: 5
-        case .idle: 6
+        case .working: 3
+        case .completed: 4
+        case .idle: 5
         }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        if value == "progress" {
+            self = .working
+        } else if let state = Self(rawValue: value) {
+            self = state
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unknown agent state: \(value)"
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
     }
 }
 
@@ -261,9 +278,6 @@ struct LightingProfile: Identifiable, Codable, Hashable, Sendable {
     var symbol: String
     var strategy: SlotStrategy
     var deviceBrightness: Double
-    var completedHoldSeconds: Double
-    var postToolHoldSeconds: Double
-    var toolTimeoutSeconds: Double
     var styles: [StateLightStyle]
 
     func style(for state: AgentState) -> StateLightStyle {
@@ -287,14 +301,10 @@ extension LightingProfile {
         symbol: "command",
         strategy: .adaptiveOccupancy,
         deviceBrightness: 0.72,
-        completedHoldSeconds: 0,
-        postToolHoldSeconds: 0,
-        toolTimeoutSeconds: 45,
         styles: [
             .init(state: .idle, colorHex: "#0A1520", secondaryColorHex: "#10304A", motion: .breathe, cycleSeconds: 8, intensity: 0.28),
             .init(state: .working, colorHex: "#FF2BD6", secondaryColorHex: "#7C3AED", motion: .breathe, cycleSeconds: 2.6, intensity: 0.82),
             .init(state: .toolRunning, colorHex: "#00D5C8", secondaryColorHex: "#007AFF", motion: .breathe, cycleSeconds: 1.8, intensity: 0.8),
-            .init(state: .progress, colorHex: "#00D5C8", secondaryColorHex: "#007AFF", motion: .breathe, cycleSeconds: 2.4, intensity: 0.72),
             .init(state: .waiting, colorHex: "#FFD60A", secondaryColorHex: "#FF9F0A", motion: .solid, cycleSeconds: 1, intensity: 0.88),
             .init(state: .error, colorHex: "#FF3B30", secondaryColorHex: "#FF453A", motion: .solid, cycleSeconds: 1, intensity: 0.95),
             .init(state: .completed, colorHex: "#30D158", secondaryColorHex: "#00C7BE", motion: .solid, cycleSeconds: 1, intensity: 0.85),
@@ -307,9 +317,6 @@ extension LightingProfile {
         symbol: "moon.stars.fill",
         strategy: .adaptiveOccupancy,
         deviceBrightness: 0.28,
-        completedHoldSeconds: 0,
-        postToolHoldSeconds: 0,
-        toolTimeoutSeconds: 40,
         styles: commandCenter.styles.map { style in
             var result = style
             result.intensity *= 0.45
@@ -325,9 +332,6 @@ extension LightingProfile {
         symbol: "bolt.fill",
         strategy: .adaptiveOccupancy,
         deviceBrightness: 1,
-        completedHoldSeconds: 0,
-        postToolHoldSeconds: 0,
-        toolTimeoutSeconds: 60,
         styles: commandCenter.styles.map { style in
             var result = style
             result.intensity = min(1, result.intensity * 1.3)
