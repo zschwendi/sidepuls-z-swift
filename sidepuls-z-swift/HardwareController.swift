@@ -130,6 +130,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
         let discovered = Self.discoverDevice()
         var next = discovered ?? DeviceState()
         if next.connected, next.path == state.path {
+            next.activeProgram = state.activeProgram
             next.lastWrite = state.lastWrite
             next.lastError = state.lastError
         }
@@ -203,6 +204,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
             atomically: false,
             encoding: .utf8
         )
+        state.activeProgram = program
         if remember {
             lastWrittenProgram = program
             lastProgramStartedAt = .now

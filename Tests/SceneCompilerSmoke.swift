@@ -71,6 +71,37 @@ enum SceneCompilerSmoke {
         precondition(lowBattery.duration == 1.5)
         precondition(lowBattery.program.utf8.count <= 512)
 
+        let brightnessPreview = LEDFirmwareProgram(
+            program: "brightness 128\n0:#FF0000;1:#00FF00",
+            ledCount: 2
+        ).frame(at: 0)
+        precondition(approximately(brightnessPreview.colors[0].red, 128.0 / 255))
+        precondition(approximately(brightnessPreview.colors[0].green, 0))
+        precondition(approximately(brightnessPreview.colors[1].green, 128.0 / 255))
+
+        let pulsePreview = LEDFirmwareProgram(
+            program: "off\n0:#FF0000 1s pulse\nrepeat",
+            ledCount: 1
+        )
+        precondition(approximately(pulsePreview.frame(at: (1.0 / 60) + 0.5).colors[0].red, 1))
+        precondition(approximately(pulsePreview.frame(at: (1.0 / 60) + 1).colors[0].red, 0))
+
+        let staggeredPreview = LEDFirmwareProgram(
+            program: "off\n0:#FF0000 500ms cosine;1:#00FF00 500ms cosine 250ms",
+            ledCount: 2
+        ).frame(at: (1.0 / 60) + 0.25)
+        precondition(approximately(staggeredPreview.colors[0].red, 0.5))
+        precondition(approximately(staggeredPreview.colors[1].green, 0))
+
+        let batteryPreview = LEDFirmwareProgram(
+            program: batteryGauge.program,
+            ledCount: 8
+        ).frame(at: (1.0 / 60) + 0.7)
+        precondition(approximately(batteryPreview.colors[0].red, 102.0 / 255))
+        precondition(approximately(batteryPreview.colors[0].green, 1))
+        precondition(approximately(batteryPreview.colors[0].blue, 95.0 / 255))
+        precondition(batteryPreview.colors[4] == .black)
+
         var linkedProfile = profile
         var linkedThinking = linkedProfile.style(for: .working)
         linkedThinking.motion = .chase
@@ -391,5 +422,9 @@ enum SceneCompilerSmoke {
             updatedAt: updatedAt,
             message: nil
         )
+    }
+
+    private static func approximately(_ value: Double, _ expected: Double) -> Bool {
+        abs(value - expected) < 0.000_1
     }
 }

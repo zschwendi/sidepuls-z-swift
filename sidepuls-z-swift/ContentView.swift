@@ -97,7 +97,7 @@ struct OverviewView: View {
                 DashboardSectionHeader(
                     eyebrow: "LIVE HARDWARE",
                     title: "What your SidePulse is showing",
-                    detail: "The app mirrors the physical device: LED \(store.device.ledCount) is at the top and LED 1 is at the bottom."
+                    detail: "A live rendering of the exact program written to the device, with LED \(store.device.ledCount) at the top and LED 1 at the bottom."
                 )
                 LEDDeckView(store: store)
 
@@ -292,26 +292,52 @@ struct LEDDeckView: View {
     @Bindable var store: CommandCenterStore
 
     var body: some View {
+        let firmware = LEDFirmwareProgram(
+            program: store.device.connected ? store.device.activeProgram : "off",
+            ledCount: store.device.ledCount
+        )
         GlassEffectContainer(spacing: 14) {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
                     Label("\(store.device.name) Array", systemImage: "lightbulb.led.wide.fill")
                         .font(.headline)
                     Spacer()
-                    Text("\(store.device.ledCount) LEDs · \(store.selectedProfile.strategy.title)")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(store.device.connected ? Color.green : Color.secondary)
+                            .frame(width: 6, height: 6)
+                        Text(store.device.connected ? "LIVE DEVICE FEED" : "DEVICE OFFLINE")
+                    }
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
                 }
 
-                HStack(alignment: .center, spacing: 22) {
-                    VStack(spacing: 10) {
-                        ForEach(store.scene.slots.sorted(by: { $0.index > $1.index })) { slot in
-                            LEDCell(slot: slot, profile: store.selectedProfile)
+                HStack(alignment: .center, spacing: 28) {
+                    TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+                        let elapsed = store.device.lastWrite.map {
+                            max(0, timeline.date.timeIntervalSince($0))
+                        } ?? 0
+                        let frame = firmware.frame(at: elapsed)
+
+                        VStack(spacing: 12) {
+                            ForEach(store.scene.slots.sorted(by: { $0.index > $1.index })) { slot in
+                                LEDCell(
+                                    slot: slot,
+                                    outputColor: frame.colors.indices.contains(slot.index)
+                                        ? frame.colors[slot.index]
+                                        : .black
+                                )
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 22)
+                        .frame(width: 126)
+                        .background(.black.opacity(0.68), in: .rect(cornerRadius: 30))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                                .stroke(.white.opacity(0.1), lineWidth: 1)
                         }
                     }
-                    .padding(22)
-                    .frame(width: 410)
-                    .background(.black.opacity(0.55), in: .rect(cornerRadius: 22))
 
                     VStack(alignment: .leading, spacing: 12) {
                         Text("ASSIGNED SESSIONS · TOP TO BOTTOM")
@@ -347,7 +373,7 @@ struct LEDDeckView: View {
                 }
 
                 Label(
-                    "LED \(store.device.ledCount) is the top of the physical device. Agent positions stay stable until a session ends.",
+                    "The squircles mirror the hardware's color, global brightness, easing, delays, and animation phase.",
                     systemImage: "arrow.down"
                 )
                 .font(.caption)
@@ -361,11 +387,16 @@ struct LEDDeckView: View {
 
 struct LEDCell: View {
     let slot: AgentLEDSlot
-    let profile: LightingProfile
+    let outputColor: LEDProgramColor
 
     private var color: Color {
-        guard let agent = slot.agent else { return .white.opacity(0.05) }
-        return Color(hex: profile.style(for: agent.state).colorHex)
+        Color(
+            .sRGB,
+            red: outputColor.red,
+            green: outputColor.green,
+            blue: outputColor.blue,
+            opacity: 1
+        )
     }
 
     var body: some View {
@@ -374,20 +405,20 @@ struct LEDCell: View {
                 .font(.caption.monospacedDigit().weight(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 18, alignment: .trailing)
-            RoundedRectangle(cornerRadius: 14)
-                .fill(color.gradient)
-                .shadow(color: color.opacity(slot.agent == nil ? 0 : 0.85), radius: 14)
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .fill(color)
+                .shadow(
+                    color: color.opacity(min(0.88, outputColor.peak * 1.15)),
+                    radius: 13
+                )
                 .overlay {
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(.white.opacity(0.18), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .stroke(.white.opacity(0.16), lineWidth: 1)
                 }
-                .frame(height: 42)
-            Image(systemName: slot.agent?.state.symbol ?? "circle.dotted")
-                .font(.caption)
-                .foregroundStyle(slot.agent == nil ? .secondary : color)
-                .frame(width: 18)
+                .frame(width: 50, height: 50)
         }
         .help(slot.agent?.name ?? "Unassigned")
+        .accessibilityLabel("LED \(slot.index + 1), \(slot.agent?.name ?? "off")")
     }
 }
 
@@ -650,7 +681,7 @@ struct StyleInspectorView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: previewColors(for: style),
@@ -659,7 +690,7 @@ struct StyleInspectorView: View {
                         )
                     )
                     .shadow(color: Color(hex: style.colorHex).opacity(0.75), radius: 20)
-                    .frame(width: 92, height: 72)
+                    .frame(width: 72, height: 72)
             }
 
             InspectorControl(title: "Color behavior") {

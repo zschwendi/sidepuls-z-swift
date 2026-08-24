@@ -421,6 +421,7 @@ struct DeviceState: Equatable, Sendable {
     var path = "/Volumes/SidePulse/LEDS.LED"
     var ledCount = 8
     var connected = false
+    var activeProgram = "off"
     var lastWrite: Date?
     var lastError: String?
 }
