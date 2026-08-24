@@ -1,0 +1,463 @@
+import Foundation
+
+struct AdaptiveOccupancyAllocator: Sendable {
+    private(set) var residentOrder: [String] = []
+
+    mutating func reset() {
+        residentOrder.removeAll()
+    }
+
+    mutating func assign(_ agents: [AgentSession], ledCount: Int) -> [AgentLEDSlot] {
+        let count = max(1, min(8, ledCount))
+        let latest = Dictionary(agents.map { ($0.id, $0) }) { current, replacement in
+            replacement.updatedAt > current.updatedAt ? replacement : current
+        }
+        let rankedIDs = latest.values.sorted { left, right in
+            if left.updatedAt != right.updatedAt { return left.updatedAt > right.updatedAt }
+            if left.state.priority != right.state.priority { return left.state.priority < right.state.priority }
+            return left.id < right.id
+        }.map(\.id)
+
+        let visible = Set(latest.keys)
+        residentOrder.removeAll(where: { !visible.contains($0) })
+        while residentOrder.count > count {
+            guard let victim = residentOrder.indices.min(by: {
+                let left = latest[residentOrder[$0]]?.updatedAt ?? .distantPast
+                let right = latest[residentOrder[$1]]?.updatedAt ?? .distantPast
+                return left < right
+            }) else { break }
+            residentOrder.remove(at: victim)
+        }
+
+        for candidate in rankedIDs where !residentOrder.contains(candidate) {
+            if residentOrder.count < count {
+                residentOrder.append(candidate)
+                continue
+            }
+            guard let candidateSession = latest[candidate],
+                  let victim = residentOrder.indices.min(by: {
+                      let left = latest[residentOrder[$0]]?.updatedAt ?? .distantPast
+                      let right = latest[residentOrder[$1]]?.updatedAt ?? .distantPast
+                      return left < right
+                  }),
+                  let victimSession = latest[residentOrder[victim]],
+                  candidateSession.updatedAt > victimSession.updatedAt
+            else { continue }
+            residentOrder[victim] = candidate
+        }
+
+        let selected = residentOrder.compactMap { latest[$0] }
+        var result = (0..<count).map { AgentLEDSlot(index: $0, agent: nil) }
+        guard !selected.isEmpty else { return result }
+
+        let blockSize: Int
+        if count == 8 {
+            switch selected.count {
+            case 1: blockSize = 8
+            case 2: blockSize = 4
+            case 3...4: blockSize = 2
+            default: blockSize = 1
+            }
+        } else if count == 2 {
+            blockSize = selected.count == 1 ? 2 : 1
+        } else {
+            blockSize = selected.count == 1 ? count : max(1, count / selected.count)
+        }
+
+        var cursor = count - 1
+        for agent in selected {
+            for _ in 0..<blockSize where cursor >= 0 {
+                result[cursor].agent = agent
+                cursor -= 1
+            }
+        }
+        return result
+    }
+}
+
+struct StableSlotAllocator: Sendable {
+    private(set) var assignments: [String: Int] = [:]
+    private(set) var lastSeen: [String: Date] = [:]
+    private var adaptiveAllocator = AdaptiveOccupancyAllocator()
+    var reservationSeconds: TimeInterval = 300
+
+    mutating func reset() {
+        assignments.removeAll()
+        lastSeen.removeAll()
+        adaptiveAllocator.reset()
+    }
+
+    mutating func assignAdaptive(_ agents: [AgentSession], ledCount: Int) -> [AgentLEDSlot] {
+        adaptiveAllocator.assign(agents, ledCount: ledCount)
+    }
+
+    mutating func assign(_ agents: [AgentSession], ledCount: Int, now: Date = .now) -> [AgentLEDSlot] {
+        let count = max(1, min(8, ledCount))
+        let latest = Dictionary(agents.map { ($0.id, $0) }) { current, replacement in
+            replacement.updatedAt > current.updatedAt ? replacement : current
+        }
+        let visible = Set(latest.keys)
+        for key in visible { lastSeen[key] = now }
+
+        for key in Array(assignments.keys) where !visible.contains(key) {
+            if now.timeIntervalSince(lastSeen[key] ?? .distantPast) >= reservationSeconds {
+                assignments[key] = nil
+                lastSeen[key] = nil
+            }
+        }
+
+        var selected = assignments
+            .filter { visible.contains($0.key) }
+            .sorted { $0.value < $1.value }
+            .map(\.key)
+        let newcomers = visible.filter { assignments[$0] == nil }.sorted { lhs, rhs in
+            guard let left = latest[lhs], let right = latest[rhs] else { return lhs < rhs }
+            if left.state.priority != right.state.priority { return left.state.priority < right.state.priority }
+            if left.updatedAt != right.updatedAt { return left.updatedAt > right.updatedAt }
+            return lhs < rhs
+        }
+        selected.append(contentsOf: newcomers)
+        selected = Array(selected.prefix(count))
+
+        for key in selected where assignments[key] == nil {
+            let used = Set(assignments.values)
+            if let free = (0..<count).first(where: { !used.contains($0) }) {
+                assignments[key] = free
+            } else if let victim = assignments.keys
+                .filter({ !visible.contains($0) })
+                .min(by: { (lastSeen[$0] ?? .distantPast) < (lastSeen[$1] ?? .distantPast) }),
+                let slot = assignments.removeValue(forKey: victim) {
+                lastSeen[victim] = nil
+                assignments[key] = slot
+            }
+        }
+
+        var result = (0..<count).map { AgentLEDSlot(index: $0, agent: nil) }
+        for key in selected {
+            guard let index = assignments[key], let agent = latest[key], index < result.count else { continue }
+            result[index].agent = agent
+        }
+        return result
+    }
+}
+
+struct LightingSceneCompiler: Sendable {
+    private struct RenderedSlot {
+        var index: Int
+        var style: StateLightStyle
+        var position: Int
+        var count: Int
+    }
+
+    func compile(
+        profile: LightingProfile,
+        agents: [AgentSession],
+        allocator: inout StableSlotAllocator,
+        ledCount: Int = 8,
+        now: Date = .now
+    ) -> CompiledScene {
+        var arranged = agents
+        switch profile.strategy {
+        case .adaptiveOccupancy:
+            break
+        case .stableAgents:
+            break
+        case .providerLanes:
+            arranged.sort {
+                $0.provider.rawValue == $1.provider.rawValue
+                    ? $0.updatedAt > $1.updatedAt
+                    : $0.provider.rawValue < $1.provider.rawValue
+            }
+        case .priorityStack:
+            arranged.sort {
+                $0.state.priority == $1.state.priority
+                    ? $0.updatedAt > $1.updatedAt
+                    : $0.state.priority < $1.state.priority
+            }
+            allocator.reset()
+        }
+
+        let slots: [AgentLEDSlot]
+        if profile.strategy == .adaptiveOccupancy {
+            slots = allocator.assignAdaptive(arranged, ledCount: ledCount)
+        } else {
+            slots = allocator.assign(arranged, ledCount: ledCount, now: now)
+        }
+        guard slots.contains(where: { $0.agent != nil }) else {
+            return CompiledScene(program: "off", slots: slots)
+        }
+
+        var indicesByAgent: [String: [Int]] = [:]
+        for slot in slots {
+            guard let agent = slot.agent else { continue }
+            indicesByAgent[agent.id, default: []].append(slot.index)
+        }
+        for key in indicesByAgent.keys {
+            indicesByAgent[key]?.sort()
+        }
+
+        let rendered = slots.compactMap { slot -> RenderedSlot? in
+            guard let agent = slot.agent,
+                  let indices = indicesByAgent[agent.id],
+                  let position = indices.firstIndex(of: slot.index)
+            else { return nil }
+            return RenderedSlot(
+                index: slot.index,
+                style: profile.style(for: agent.state),
+                position: position,
+                count: indices.count
+            )
+        }
+
+        let needsSecondPhase = rendered.contains { slot in
+            slot.style.colorMode == .rotatingColorway
+                || slot.style.motion == .flash
+                || (slot.style.motion == .chase && slot.count > 1)
+        }
+        let renderedByIndex = Dictionary(uniqueKeysWithValues: rendered.map { ($0.index, $0) })
+        let baseSegments = slots.map { slot -> String in
+            guard let renderedSlot = renderedByIndex[slot.index] else { return "\(slot.index):#000000" }
+            let style = renderedSlot.style
+            switch style.motion {
+            case .solid:
+                return "\(slot.index):\(color(for: renderedSlot, phase: 0))"
+            default:
+                return "\(slot.index):#000000"
+            }
+        }
+        let baseLine = baseSegments.allSatisfy({ $0.hasSuffix("#000000") })
+            ? "off"
+            : baseSegments.joined(separator: ";")
+
+        let phaseOne = rendered.compactMap {
+            animatedSegment(for: $0, phase: 1, reverse: false, splitCycle: needsSecondPhase)
+        }
+        let phaseTwo = needsSecondPhase ? rendered.compactMap {
+            animatedSegment(for: $0, phase: 2, reverse: true, splitCycle: true)
+        } : []
+        let animated = !phaseOne.isEmpty || !phaseTwo.isEmpty
+        var lines: [String] = []
+        let brightness = Int(max(0, min(1, profile.deviceBrightness)) * 255)
+        if brightness < 255 { lines.append("brightness \(brightness)") }
+        lines.append(baseLine)
+        if animated {
+            if !phaseOne.isEmpty { lines.append(phaseOne.joined(separator: ";")) }
+            if !phaseTwo.isEmpty { lines.append(phaseTwo.joined(separator: ";")) }
+            lines.append("repeat")
+        }
+        let program = lines.joined(separator: "\n")
+        precondition(program.utf8.count <= 512, "Compiled LED program exceeds the firmware limit")
+        return CompiledScene(program: program, slots: slots)
+    }
+
+    private func animatedSegment(
+        for slot: RenderedSlot,
+        phase: Int,
+        reverse: Bool,
+        splitCycle: Bool
+    ) -> String? {
+        let style = slot.style
+        guard style.motion.isAnimated || (style.motion == .solid && style.colorMode == .rotatingColorway) else {
+            return nil
+        }
+
+        let cycle = max(0.2, min(30, style.cycleSeconds)) / (splitCycle ? 2 : 1)
+        let targetPhase = style.colorMode == .rotatingColorway ? phase : 0
+        let color = color(for: slot, phase: targetPhase)
+
+        switch style.motion {
+        case .off:
+            return nil
+        case .solid:
+            let target = phase == 2 ? self.color(for: slot, phase: 0) : color
+            return "\(slot.index):\(target) \(time(cycle)) cosine"
+        case .flash:
+            let target = phase == 2 ? "#000000" : color
+            return "\(slot.index):\(target) \(time(cycle)) none"
+        case .pulse:
+            return pulseSegment(index: slot.index, color: color, duration: cycle, delay: 0)
+        case .breathe:
+            return travelingSegment(for: slot, color: color, total: cycle, step: slot.position)
+        case .chase:
+            let step = reverse ? slot.count - 1 - slot.position : slot.position
+            return travelingSegment(for: slot, color: color, total: cycle, step: step)
+        case .converge:
+            let step = min(slot.position, slot.count - 1 - slot.position)
+            return travelingSegment(for: slot, color: color, total: cycle, step: step)
+        case .diverge:
+            let leftCenter = (slot.count - 1) / 2
+            let rightCenter = slot.count / 2
+            let step = min(abs(slot.position - leftCenter), abs(slot.position - rightCenter))
+            return travelingSegment(for: slot, color: color, total: cycle, step: step)
+        }
+    }
+
+    private func travelingSegment(
+        for slot: RenderedSlot,
+        color: String,
+        total: Double,
+        step: Int
+    ) -> String {
+        let maxStep: Int
+        switch slot.style.motion {
+        case .converge:
+            maxStep = max(0, (slot.count - 1) / 2)
+        case .diverge:
+            maxStep = max(0, (slot.count - 1) / 2)
+        default:
+            maxStep = max(0, slot.count - 1)
+        }
+        guard maxStep > 0 else {
+            return pulseSegment(index: slot.index, color: color, duration: total, delay: 0)
+        }
+        let duration = max(0.16, total * 0.58)
+        let delay = max(0, total - duration) * Double(step) / Double(maxStep)
+        return pulseSegment(index: slot.index, color: color, duration: duration, delay: delay)
+    }
+
+    private func pulseSegment(index: Int, color: String, duration: Double, delay: Double) -> String {
+        var segment = "\(index):\(color) \(time(duration)) pulse"
+        if delay >= 0.005 { segment += " \(time(delay))" }
+        return segment
+    }
+
+    private func color(for slot: RenderedSlot, phase: Int) -> String {
+        let style = slot.style
+        let primary = rgb(style.colorHex)
+        let secondary = rgb(style.secondaryColorHex)
+        let value: (Double, Double, Double)
+        switch style.colorMode {
+        case .single:
+            value = primary
+        case .colorway:
+            let amount = slot.count <= 1 ? 0 : Double(slot.position) / Double(slot.count - 1)
+            value = interpolate(primary, secondary, amount: amount)
+        case .rainbow:
+            let divisor = Double(max(2, slot.count))
+            let offset = slot.count <= 1 ? Double(slot.index) / 8 : Double(slot.position) / divisor
+            value = hsv(hue: offset, saturation: 0.9, value: 1)
+        case .rotatingColorway:
+            if slot.count <= 1 {
+                value = phase.isMultiple(of: 2) ? primary : secondary
+            } else {
+                let offset = Double((slot.position + phase) % slot.count) / Double(slot.count)
+                let amount = 1 - abs((offset * 2) - 1)
+                value = interpolate(primary, secondary, amount: amount)
+            }
+        }
+        return hex(value, factor: style.intensity)
+    }
+
+    private func rgb(_ value: String) -> (Double, Double, Double) {
+        let clean = value.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard clean.count == 6, let raw = Int(clean, radix: 16) else { return (1, 1, 1) }
+        return (
+            Double((raw >> 16) & 0xFF) / 255,
+            Double((raw >> 8) & 0xFF) / 255,
+            Double(raw & 0xFF) / 255
+        )
+    }
+
+    private func interpolate(
+        _ first: (Double, Double, Double),
+        _ second: (Double, Double, Double),
+        amount: Double
+    ) -> (Double, Double, Double) {
+        let t = max(0, min(1, amount))
+        return (
+            first.0 + ((second.0 - first.0) * t),
+            first.1 + ((second.1 - first.1) * t),
+            first.2 + ((second.2 - first.2) * t)
+        )
+    }
+
+    private func hsv(hue: Double, saturation: Double, value: Double) -> (Double, Double, Double) {
+        let h = (hue - floor(hue)) * 6
+        let i = Int(floor(h))
+        let fraction = h - floor(h)
+        let p = value * (1 - saturation)
+        let q = value * (1 - (saturation * fraction))
+        let t = value * (1 - (saturation * (1 - fraction)))
+        switch i % 6 {
+        case 0: return (value, t, p)
+        case 1: return (q, value, p)
+        case 2: return (p, value, t)
+        case 3: return (p, q, value)
+        case 4: return (t, p, value)
+        default: return (value, p, q)
+        }
+    }
+
+    private func hex(_ value: (Double, Double, Double), factor: Double) -> String {
+        let amount = max(0, min(1, factor))
+        let red = Int((max(0, min(1, value.0)) * amount * 255).rounded())
+        let green = Int((max(0, min(1, value.1)) * amount * 255).rounded())
+        let blue = Int((max(0, min(1, value.2)) * amount * 255).rounded())
+        return String(format: "#%02X%02X%02X", red, green, blue)
+    }
+
+    private func time(_ seconds: Double) -> String {
+        let milliseconds = max(1, Int((seconds * 1_000 / 10).rounded()) * 10)
+        if milliseconds.isMultiple(of: 1_000) { return "\(milliseconds / 1_000)s" }
+        if milliseconds >= 1_000 {
+            let value = String(format: "%.2f", Double(milliseconds) / 1_000)
+                .replacingOccurrences(of: "0$", with: "", options: .regularExpression)
+            return "\(value)s"
+        }
+        return "\(milliseconds)ms"
+    }
+}
+
+struct TimedLightingScene: Equatable, Sendable {
+    var program: String
+    var duration: TimeInterval
+}
+
+enum SystemLightingScenes {
+    static func lidTransition(ledCount: Int, closing: Bool) -> TimedLightingScene {
+        let count = max(1, min(8, ledCount))
+        let indices = closing ? Array((0..<count).reversed()) : Array(0..<count)
+        let staggerMilliseconds = 55
+        let sweep: [String]
+        let lines: [String]
+        let durationMilliseconds: Int
+
+        if closing {
+            let fadeMilliseconds = 170
+            sweep = indices.enumerated().map { position, index in
+                let delay = position * staggerMilliseconds
+                return delay == 0
+                    ? "\(index):#000000 \(fadeMilliseconds)ms cosine"
+                    : "\(index):#000000 \(fadeMilliseconds)ms cosine \(delay)ms"
+            }
+            lines = [
+                "brightness 255",
+                "#FFFFFF 160ms cosine",
+                "#FFFFFF 120ms none",
+                sweep.joined(separator: ";"),
+                "off 100ms none",
+            ]
+            durationMilliseconds = 160 + 120 + fadeMilliseconds + ((count - 1) * staggerMilliseconds) + 100
+        } else {
+            let fillMilliseconds = 80
+            sweep = indices.enumerated().map { position, index in
+                let delay = position * staggerMilliseconds
+                return delay == 0
+                    ? "\(index):#FFFFFF \(fillMilliseconds)ms none"
+                    : "\(index):#FFFFFF \(fillMilliseconds)ms none \(delay)ms"
+            }
+            lines = [
+                "brightness 255",
+                "off",
+                sweep.joined(separator: ";"),
+                "#FFFFFF 200ms none",
+                "off 240ms cosine",
+            ]
+            durationMilliseconds = fillMilliseconds + ((count - 1) * staggerMilliseconds) + 200 + 240
+        }
+
+        let program = lines.joined(separator: "\n")
+        let duration = Double(durationMilliseconds) / 1_000 + 0.04
+        return TimedLightingScene(program: program, duration: duration)
+    }
+}
