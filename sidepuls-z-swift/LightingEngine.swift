@@ -417,6 +417,7 @@ enum SystemLightingScenes {
     private static let fillMilliseconds = 500
     private static let batteryHoldMilliseconds = 1_500
     private static let lowBatteryHoldMilliseconds = 1_000
+    private static let batteryGreen = "#66FF5F"
 
     static func illuminatedLEDCount(chargeFraction: Double, ledCount: Int) -> Int {
         let count = max(1, min(8, ledCount))
@@ -429,9 +430,9 @@ enum SystemLightingScenes {
     static func batteryGauge(chargeFraction: Double, ledCount: Int) -> TimedLightingScene {
         let count = max(1, min(8, ledCount))
         let illuminated = illuminatedLEDCount(chargeFraction: chargeFraction, ledCount: count)
-        let sweep = fillSegments(indices: Array(0..<illuminated), color: "#FFFFFF")
+        let sweep = fillSegments(indices: Array(0..<illuminated), color: batteryGreen)
         let hold = (0..<count).map { index in
-            let color = index < illuminated ? "#FFFFFF" : "#000000"
+            let color = index < illuminated ? batteryGreen : "#000000"
             return "\(index):\(color) \(batteryHoldMilliseconds)ms none"
         }
         let program = [
@@ -450,12 +451,12 @@ enum SystemLightingScenes {
     static func lowBatteryAlert(ledCount: Int) -> TimedLightingScene {
         let count = max(1, min(8, ledCount))
         let greenCount = min(2, count)
-        var animation = fillSegments(indices: Array(0..<greenCount), color: "#30D158")
+        var animation = fillSegments(indices: Array(0..<greenCount), color: batteryGreen)
         animation += (greenCount..<count).map {
             "\($0):#260000 \(fillMilliseconds)ms cosine"
         }
         let hold = (0..<count).map { index in
-            let color = index < greenCount ? "#30D158" : "#260000"
+            let color = index < greenCount ? batteryGreen : "#260000"
             return "\(index):\(color) \(lowBatteryHoldMilliseconds / 1_000)s none"
         }
         let program = [
