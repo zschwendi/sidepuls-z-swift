@@ -2,6 +2,11 @@ import Foundation
 import IOKit
 import IOKit.ps
 
+enum HardwareUpdateTiming: Equatable, Sendable {
+    case immediate
+    case animationBoundary(cycleSeconds: TimeInterval)
+}
+
 final class SidePulseHardwareController: @unchecked Sendable {
     typealias UpdateHandler = @Sendable (DeviceState) -> Void
 
@@ -12,7 +17,11 @@ final class SidePulseHardwareController: @unchecked Sendable {
     private var outputEnabled = false
     private var requestedProgram = "off"
     private var lastWrittenProgram: String?
+    private var lastProgramStartedAt: Date?
     private var previewGeneration = 0
+    private var activePreviewGeneration: Int?
+    private var deferredWriteGeneration = 0
+    private var deferredWriteDeadline: Date?
     private let outputDisabledByEnvironment: Bool
 
     init(onUpdate: @escaping UpdateHandler) {
@@ -38,26 +47,54 @@ final class SidePulseHardwareController: @unchecked Sendable {
         queue.sync {
             timer?.cancel()
             timer = nil
+            cancelPreviewLocked()
+            cancelDeferredWriteLocked()
             if outputEnabled { try? writeLocked("off", remember: false) }
             outputEnabled = false
         }
     }
 
-    func update(enabled: Bool, program: String) {
+    func update(
+        enabled: Bool,
+        program: String,
+        timing: HardwareUpdateTiming = .immediate
+    ) {
         queue.async { [weak self] in
             guard let self else { return }
             let wasEnabled = outputEnabled
+            let enabledChanged = enabled != outputEnabled
+            let programChanged = program != requestedProgram
+            guard enabledChanged || programChanged else { return }
             outputEnabled = enabled
             requestedProgram = program
-            previewGeneration += 1
-            if enabled {
-                tryWriteRequestedLocked()
-            } else if wasEnabled {
+            if !enabled {
+                cancelPreviewLocked()
+                cancelDeferredWriteLocked()
+                if !wasEnabled { return }
                 do {
                     try writeLocked("off", remember: true)
                 } catch {
                     recordErrorLocked(error)
                 }
+                return
+            }
+
+            if !wasEnabled {
+                cancelPreviewLocked()
+                cancelDeferredWriteLocked()
+                tryWriteRequestedLocked(force: true)
+                return
+            }
+
+            switch timing {
+            case .immediate:
+                let wasPreviewActive = activePreviewGeneration != nil
+                cancelPreviewLocked()
+                cancelDeferredWriteLocked()
+                tryWriteRequestedLocked(force: wasPreviewActive)
+            case .animationBoundary(let cycleSeconds):
+                guard activePreviewGeneration == nil else { return }
+                scheduleRequestedWriteAtBoundaryLocked(cycleSeconds: cycleSeconds)
             }
         }
     }
@@ -65,16 +102,20 @@ final class SidePulseHardwareController: @unchecked Sendable {
     func preview(program: String, duration: TimeInterval = 3) {
         queue.async { [weak self] in
             guard let self, state.connected else { return }
+            cancelDeferredWriteLocked()
             previewGeneration += 1
             let generation = previewGeneration
+            activePreviewGeneration = generation
             do {
                 try writeLocked(program, remember: false)
             } catch {
+                activePreviewGeneration = nil
                 recordErrorLocked(error)
                 return
             }
             queue.asyncAfter(deadline: .now() + max(0.5, duration)) { [weak self] in
-                guard let self, generation == previewGeneration else { return }
+                guard let self, activePreviewGeneration == generation else { return }
+                activePreviewGeneration = nil
                 let restore = outputEnabled ? requestedProgram : "off"
                 do {
                     try writeLocked(restore, remember: outputEnabled)
@@ -95,16 +136,59 @@ final class SidePulseHardwareController: @unchecked Sendable {
         let changed = next != state
         state = next
         if changed { onUpdate(state) }
-        if state.connected, outputEnabled { tryWriteRequestedLocked() }
+        if state.connected, outputEnabled, activePreviewGeneration == nil { tryWriteRequestedLocked() }
     }
 
-    private func tryWriteRequestedLocked() {
-        guard state.connected, requestedProgram != lastWrittenProgram else { return }
+    private func tryWriteRequestedLocked(force: Bool = false) {
+        if let deadline = deferredWriteDeadline {
+            guard deadline <= .now else { return }
+            deferredWriteDeadline = nil
+        }
+        guard state.connected, force || requestedProgram != lastWrittenProgram else { return }
         do {
             try writeLocked(requestedProgram, remember: true)
         } catch {
             recordErrorLocked(error)
         }
+    }
+
+    private func scheduleRequestedWriteAtBoundaryLocked(cycleSeconds: TimeInterval) {
+        cancelDeferredWriteLocked()
+        guard requestedProgram != lastWrittenProgram else { return }
+        guard let lastProgramStartedAt else {
+            tryWriteRequestedLocked()
+            return
+        }
+
+        let cycle = max(0.2, min(30, cycleSeconds))
+        let elapsed = max(0, Date.now.timeIntervalSince(lastProgramStartedAt))
+        let phase = elapsed.truncatingRemainder(dividingBy: cycle)
+        let delay = phase < 0.04 ? 0 : cycle - phase
+        guard delay >= 0.04 else {
+            tryWriteRequestedLocked()
+            return
+        }
+
+        deferredWriteDeadline = Date.now.addingTimeInterval(delay)
+        let generation = deferredWriteGeneration
+        queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self,
+                  deferredWriteGeneration == generation,
+                  activePreviewGeneration == nil
+            else { return }
+            deferredWriteDeadline = nil
+            tryWriteRequestedLocked()
+        }
+    }
+
+    private func cancelPreviewLocked() {
+        previewGeneration += 1
+        activePreviewGeneration = nil
+    }
+
+    private func cancelDeferredWriteLocked() {
+        deferredWriteGeneration += 1
+        deferredWriteDeadline = nil
     }
 
     private func writeLocked(_ program: String, remember: Bool) throws {
@@ -119,7 +203,10 @@ final class SidePulseHardwareController: @unchecked Sendable {
             atomically: false,
             encoding: .utf8
         )
-        if remember { lastWrittenProgram = program }
+        if remember {
+            lastWrittenProgram = program
+            lastProgramStartedAt = .now
+        }
         state.lastWrite = .now
         state.lastError = nil
         onUpdate(state)

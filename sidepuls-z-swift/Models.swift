@@ -122,6 +122,25 @@ struct AgentSession: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+enum AgentStateTransitionPolicy {
+    static func defersToAnimationBoundary(
+        from previous: [String: AgentState],
+        to current: [String: AgentState]
+    ) -> Bool {
+        guard !previous.isEmpty,
+              Set(previous.keys) == Set(current.keys),
+              previous != current
+        else { return false }
+
+        let flowingStates: Set<AgentState> = [.working, .toolRunning]
+        let changedIDs = current.keys.filter { previous[$0] != current[$0] }
+        return !changedIDs.isEmpty && changedIDs.allSatisfy { id in
+            guard let oldState = previous[id], let newState = current[id] else { return false }
+            return flowingStates.contains(oldState) && flowingStates.contains(newState)
+        }
+    }
+}
+
 enum LightMotion: String, CaseIterable, Identifiable, Sendable, Codable {
     case off, solid, flash, pulse, breathe, chase, converge, diverge
 
@@ -286,6 +305,18 @@ struct LightingProfile: Identifiable, Codable, Hashable, Sendable {
     }
 
     mutating func updateStyle(_ style: StateLightStyle) {
+        replaceStyle(style)
+        guard [.working, .toolRunning].contains(style.state) else { return }
+
+        let companionState: AgentState = style.state == .working ? .toolRunning : .working
+        var companion = self.style(for: companionState)
+        companion.motion = style.motion
+        companion.cycleSeconds = style.cycleSeconds
+        companion.intensity = style.intensity
+        replaceStyle(companion)
+    }
+
+    private mutating func replaceStyle(_ style: StateLightStyle) {
         if let index = styles.firstIndex(where: { $0.state == style.state }) {
             styles[index] = style
         } else {
@@ -304,7 +335,7 @@ extension LightingProfile {
         styles: [
             .init(state: .idle, colorHex: "#0A1520", secondaryColorHex: "#10304A", motion: .breathe, cycleSeconds: 8, intensity: 0.28),
             .init(state: .working, colorHex: "#FF2BD6", secondaryColorHex: "#7C3AED", motion: .breathe, cycleSeconds: 2.6, intensity: 0.82),
-            .init(state: .toolRunning, colorHex: "#00D5C8", secondaryColorHex: "#007AFF", motion: .breathe, cycleSeconds: 1.8, intensity: 0.8),
+            .init(state: .toolRunning, colorHex: "#00D5C8", secondaryColorHex: "#007AFF", motion: .breathe, cycleSeconds: 2.6, intensity: 0.82),
             .init(state: .waiting, colorHex: "#FFD60A", secondaryColorHex: "#FF9F0A", motion: .solid, cycleSeconds: 1, intensity: 0.88),
             .init(state: .error, colorHex: "#FF3B30", secondaryColorHex: "#FF453A", motion: .solid, cycleSeconds: 1, intensity: 0.95),
             .init(state: .completed, colorHex: "#30D158", secondaryColorHex: "#00C7BE", motion: .solid, cycleSeconds: 1, intensity: 0.85),

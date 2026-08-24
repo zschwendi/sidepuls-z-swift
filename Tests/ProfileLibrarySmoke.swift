@@ -33,13 +33,17 @@ enum ProfileLibrarySmoke {
         defaults.set(try JSONSerialization.data(withJSONObject: legacyLibrary), forKey: "sidepulse.profile-library.v1")
 
         let migrated = try require(ProfileLibrary.load(from: defaults))
-        precondition(migrated.schemaVersion == 7)
+        precondition(migrated.schemaVersion == 8)
         precondition(migrated.profiles.first(where: { $0.id == builtIn.id })?.style(for: .working).motion == .breathe)
         precondition(migrated.profiles.first(where: { $0.id == custom.id })?.style(for: .working).motion == .pulse)
         precondition(
             migrated.profiles.first(where: { $0.id == builtIn.id })?.styles.filter { $0.state == .working }.count == 1
         )
-        print("Profile library smoke passed: legacy Progress collapses into Thinking without duplicate styles")
+        let migratedBuiltIn = try require(migrated.profiles.first(where: { $0.id == builtIn.id }))
+        precondition(migratedBuiltIn.style(for: .toolRunning).motion == migratedBuiltIn.style(for: .working).motion)
+        precondition(migratedBuiltIn.style(for: .toolRunning).cycleSeconds == migratedBuiltIn.style(for: .working).cycleSeconds)
+        precondition(migratedBuiltIn.style(for: .toolRunning).intensity == migratedBuiltIn.style(for: .working).intensity)
+        print("Profile library smoke passed: Thinking and Tool motion stay linked through migration")
     }
 
     private static func require<T>(_ value: T?) throws -> T {

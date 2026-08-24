@@ -72,6 +72,7 @@ final class CommandCenterStore {
     @ObservationIgnored private var batteryMonitor: BatteryStateMonitor?
     @ObservationIgnored private var lastLowBatteryAlertAt: Date?
     @ObservationIgnored private var isShowingPreviewData = true
+    @ObservationIgnored private var lastOutputStates: [String: AgentState] = [:]
 
     init() {
         if let saved = ProfileLibrary.load(), !saved.profiles.isEmpty {
@@ -304,6 +305,25 @@ final class CommandCenterStore {
     }
 
     private func syncHardwareOutput() {
-        hardware?.update(enabled: liveOutputEnabled, program: scene.program)
+        guard let hardware else { return }
+        let currentStates = Dictionary(uniqueKeysWithValues: scene.placementsTopToBottom.map {
+            ($0.agent.id, $0.agent.state)
+        })
+        let timing = hardwareTiming(from: lastOutputStates, to: currentStates)
+        hardware.update(enabled: liveOutputEnabled, program: scene.program, timing: timing)
+        lastOutputStates = currentStates
+    }
+
+    private func hardwareTiming(
+        from previous: [String: AgentState],
+        to current: [String: AgentState]
+    ) -> HardwareUpdateTiming {
+        guard liveOutputEnabled,
+              AgentStateTransitionPolicy.defersToAnimationBoundary(from: previous, to: current)
+        else { return .immediate }
+
+        let thinkingStyle = selectedProfile.style(for: .working)
+        guard thinkingStyle.motion.isAnimated else { return .immediate }
+        return .animationBoundary(cycleSeconds: thinkingStyle.cycleSeconds)
     }
 }

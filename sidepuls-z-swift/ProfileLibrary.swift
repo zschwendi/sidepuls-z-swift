@@ -1,7 +1,7 @@
 import Foundation
 
 struct SavedProfileLibrary: Codable, Sendable {
-    var schemaVersion = 7
+    var schemaVersion = 8
     var profiles: [LightingProfile]
     var selectedProfileID: UUID
 }
@@ -12,7 +12,7 @@ enum ProfileLibrary {
     static func load(from defaults: UserDefaults = .standard) -> SavedProfileLibrary? {
         guard let data = defaults.data(forKey: storageKey) else { return nil }
         guard var library = try? JSONDecoder().decode(SavedProfileLibrary.self, from: data) else { return nil }
-        guard library.schemaVersion < 7 else { return library }
+        guard library.schemaVersion < 8 else { return library }
 
         let builtIns = [
             LightingProfile.commandCenter,
@@ -48,7 +48,17 @@ enum ProfileLibrary {
                 }
             }
         }
-        library.schemaVersion = 7
+        if library.schemaVersion < 8 {
+            for profileIndex in library.profiles.indices {
+                let thinking = library.profiles[profileIndex].style(for: .working)
+                var tool = library.profiles[profileIndex].style(for: .toolRunning)
+                tool.motion = thinking.motion
+                tool.cycleSeconds = thinking.cycleSeconds
+                tool.intensity = thinking.intensity
+                library.profiles[profileIndex].updateStyle(tool)
+            }
+        }
+        library.schemaVersion = 8
         save(
             profiles: library.profiles,
             selectedProfileID: library.selectedProfileID,

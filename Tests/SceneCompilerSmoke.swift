@@ -19,6 +19,9 @@ enum SceneCompilerSmoke {
         precondition(profile.style(for: .working).colorHex == "#FF2BD6")
         precondition(profile.style(for: .working).motion == .breathe)
         precondition(profile.style(for: .toolRunning).colorHex == "#00D5C8")
+        precondition(profile.style(for: .toolRunning).motion == profile.style(for: .working).motion)
+        precondition(profile.style(for: .toolRunning).cycleSeconds == profile.style(for: .working).cycleSeconds)
+        precondition(profile.style(for: .toolRunning).intensity == profile.style(for: .working).intensity)
         precondition(profile.style(for: .waiting).colorHex == "#FFD60A")
         precondition(profile.style(for: .waiting).motion == .solid)
         precondition(profile.style(for: .completed).colorHex == "#30D158")
@@ -53,9 +56,9 @@ enum SceneCompilerSmoke {
         precondition(batteryGauge.program.hasPrefix("brightness 255\noff\n"))
         precondition(batteryGauge.program.contains("0:#FFFFFF 120ms cosine"))
         precondition(batteryGauge.program.contains("3:#FFFFFF 120ms cosine 378ms"))
-        precondition(batteryGauge.program.contains("3:#FFFFFF 1s none"))
-        precondition(batteryGauge.program.contains("4:#000000 1s none"), "Unfilled battery LEDs must remain off")
-        precondition(batteryGauge.duration == 1.5, "Battery gauge must animate for 0.5s and hold for 1s")
+        precondition(batteryGauge.program.contains("3:#FFFFFF 1500ms none"))
+        precondition(batteryGauge.program.contains("4:#000000 1500ms none"), "Unfilled battery LEDs must remain off")
+        precondition(batteryGauge.duration == 2, "Battery gauge must animate for 0.5s and hold for 1.5s")
         precondition(batteryGauge.program.utf8.count <= 512)
 
         let lowBattery = SystemLightingScenes.lowBatteryAlert(ledCount: 8)
@@ -67,6 +70,38 @@ enum SceneCompilerSmoke {
         precondition(lowBattery.program.contains("7:#260000 1s none"))
         precondition(lowBattery.duration == 1.5)
         precondition(lowBattery.program.utf8.count <= 512)
+
+        var linkedProfile = profile
+        var linkedThinking = linkedProfile.style(for: .working)
+        linkedThinking.motion = .chase
+        linkedThinking.cycleSeconds = 3.4
+        linkedThinking.intensity = 0.64
+        linkedProfile.updateStyle(linkedThinking)
+        let linkedTool = linkedProfile.style(for: .toolRunning)
+        precondition(linkedTool.motion == .chase)
+        precondition(linkedTool.cycleSeconds == 3.4)
+        precondition(linkedTool.intensity == 0.64)
+        precondition(linkedTool.colorHex == "#00D5C8", "Tool Running must retain its own palette")
+        precondition(AgentStateTransitionPolicy.defersToAnimationBoundary(
+            from: ["agent": .working],
+            to: ["agent": .toolRunning]
+        ))
+        precondition(AgentStateTransitionPolicy.defersToAnimationBoundary(
+            from: ["agent": .toolRunning],
+            to: ["agent": .working]
+        ))
+        precondition(!AgentStateTransitionPolicy.defersToAnimationBoundary(
+            from: ["agent": .working],
+            to: ["agent": .completed]
+        ), "Done must switch immediately")
+        precondition(!AgentStateTransitionPolicy.defersToAnimationBoundary(
+            from: ["agent": .toolRunning],
+            to: ["agent": .waiting]
+        ), "Needs Approval must switch immediately")
+        precondition(!AgentStateTransitionPolicy.defersToAnimationBoundary(
+            from: ["agent": .working],
+            to: ["agent": .error]
+        ), "Error must switch immediately")
 
         assertProLayout(agentCount: 1, expectedOccupancy: [8], now: now, compiler: compiler)
         assertProLayout(agentCount: 2, expectedOccupancy: [4, 4], now: now, compiler: compiler)

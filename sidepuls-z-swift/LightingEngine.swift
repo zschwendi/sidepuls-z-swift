@@ -415,7 +415,8 @@ struct TimedLightingScene: Equatable, Sendable {
 
 enum SystemLightingScenes {
     private static let fillMilliseconds = 500
-    private static let holdMilliseconds = 1_000
+    private static let batteryHoldMilliseconds = 1_500
+    private static let lowBatteryHoldMilliseconds = 1_000
 
     static func illuminatedLEDCount(chargeFraction: Double, ledCount: Int) -> Int {
         let count = max(1, min(8, ledCount))
@@ -431,7 +432,7 @@ enum SystemLightingScenes {
         let sweep = fillSegments(indices: Array(0..<illuminated), color: "#FFFFFF")
         let hold = (0..<count).map { index in
             let color = index < illuminated ? "#FFFFFF" : "#000000"
-            return "\(index):\(color) \(holdMilliseconds / 1_000)s none"
+            return "\(index):\(color) \(batteryHoldMilliseconds)ms none"
         }
         let program = [
             "brightness 255",
@@ -442,7 +443,7 @@ enum SystemLightingScenes {
         precondition(program.utf8.count <= 512, "Battery gauge exceeds the firmware limit")
         return TimedLightingScene(
             program: program,
-            duration: Double(fillMilliseconds + holdMilliseconds) / 1_000
+            duration: Double(fillMilliseconds + batteryHoldMilliseconds) / 1_000
         )
     }
 
@@ -455,7 +456,7 @@ enum SystemLightingScenes {
         }
         let hold = (0..<count).map { index in
             let color = index < greenCount ? "#30D158" : "#260000"
-            return "\(index):\(color) \(holdMilliseconds / 1_000)s none"
+            return "\(index):\(color) \(lowBatteryHoldMilliseconds / 1_000)s none"
         }
         let program = [
             "brightness 255",
@@ -466,7 +467,7 @@ enum SystemLightingScenes {
         precondition(program.utf8.count <= 512, "Low-battery alert exceeds the firmware limit")
         return TimedLightingScene(
             program: program,
-            duration: Double(fillMilliseconds + holdMilliseconds) / 1_000
+            duration: Double(fillMilliseconds + lowBatteryHoldMilliseconds) / 1_000
         )
     }
 
