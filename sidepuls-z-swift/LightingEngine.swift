@@ -418,6 +418,9 @@ enum SystemLightingScenes {
     private static let batteryHoldMilliseconds = 1_500
     private static let lowBatteryHoldMilliseconds = 1_000
     private static let batteryGreen = "#66FF5F"
+    private static let batteryOrange = "#FF9F0A"
+    private static let batteryRed = "#FF3B30"
+    private static let batteryRemainder = "#4D4D4D"
 
     static func illuminatedLEDCount(chargeFraction: Double, ledCount: Int) -> Int {
         let count = max(1, min(8, ledCount))
@@ -430,14 +433,15 @@ enum SystemLightingScenes {
     static func batteryGauge(chargeFraction: Double, ledCount: Int) -> TimedLightingScene {
         let count = max(1, min(8, ledCount))
         let illuminated = illuminatedLEDCount(chargeFraction: chargeFraction, ledCount: count)
-        let sweep = fillSegments(indices: Array(0..<illuminated), color: batteryGreen)
+        let levelColor = batteryLevelColor(illuminated: illuminated, ledCount: count)
+        let sweep = fillSegments(indices: Array(0..<illuminated), color: levelColor)
         let hold = (0..<count).map { index in
-            let color = index < illuminated ? batteryGreen : "#000000"
+            let color = index < illuminated ? levelColor : batteryRemainder
             return "\(index):\(color) \(batteryHoldMilliseconds)ms none"
         }
         let program = [
             "brightness 255",
-            "off",
+            batteryRemainder,
             sweep.joined(separator: ";"),
             hold.joined(separator: ";"),
         ].joined(separator: "\n")
@@ -446,6 +450,13 @@ enum SystemLightingScenes {
             program: program,
             duration: Double(fillMilliseconds + batteryHoldMilliseconds) / 1_000
         )
+    }
+
+    private static func batteryLevelColor(illuminated: Int, ledCount: Int) -> String {
+        let count = max(1, ledCount)
+        if illuminated * 8 >= count * 5 { return batteryGreen }
+        if illuminated * 8 >= count * 3 { return batteryOrange }
+        return batteryRed
     }
 
     static func lowBatteryAlert(ledCount: Int) -> TimedLightingScene {

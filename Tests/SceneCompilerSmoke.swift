@@ -53,13 +53,22 @@ enum SceneCompilerSmoke {
         precondition(SystemLightingScenes.illuminatedLEDCount(chargeFraction: 0.9375, ledCount: 8) == 8)
 
         let batteryGauge = SystemLightingScenes.batteryGauge(chargeFraction: 0.45, ledCount: 8)
-        precondition(batteryGauge.program.hasPrefix("brightness 255\noff\n"))
-        precondition(batteryGauge.program.contains("0:#66FF5F 120ms cosine"))
-        precondition(batteryGauge.program.contains("3:#66FF5F 120ms cosine 378ms"))
-        precondition(batteryGauge.program.contains("3:#66FF5F 1500ms none"))
-        precondition(batteryGauge.program.contains("4:#000000 1500ms none"), "Unfilled battery LEDs must remain off")
+        precondition(batteryGauge.program.hasPrefix("brightness 255\n#4D4D4D\n"))
+        precondition(batteryGauge.program.contains("0:#FF9F0A 120ms cosine"))
+        precondition(batteryGauge.program.contains("3:#FF9F0A 120ms cosine 378ms"))
+        precondition(batteryGauge.program.contains("3:#FF9F0A 1500ms none"))
+        precondition(batteryGauge.program.contains("4:#4D4D4D 1500ms none"), "Unfilled battery LEDs must remain dim white")
         precondition(batteryGauge.duration == 2, "Battery gauge must animate for 0.5s and hold for 1.5s")
         precondition(batteryGauge.program.utf8.count <= 512)
+
+        let greenBattery = SystemLightingScenes.batteryGauge(chargeFraction: 0.625, ledCount: 8)
+        precondition(greenBattery.program.contains("4:#66FF5F 1500ms none"))
+        let redBattery = SystemLightingScenes.batteryGauge(chargeFraction: 0.25, ledCount: 8)
+        precondition(redBattery.program.contains("1:#FF3B30 1500ms none"))
+        let dotFullBattery = SystemLightingScenes.batteryGauge(chargeFraction: 1, ledCount: 2)
+        precondition(dotFullBattery.program.contains("1:#66FF5F 1500ms none"))
+        let dotHalfBattery = SystemLightingScenes.batteryGauge(chargeFraction: 0.5, ledCount: 2)
+        precondition(dotHalfBattery.program.contains("0:#FF9F0A 1500ms none"))
 
         let lowBattery = SystemLightingScenes.lowBatteryAlert(ledCount: 8)
         precondition(lowBattery.program.hasPrefix("brightness 255\noff\n"))
@@ -97,10 +106,12 @@ enum SceneCompilerSmoke {
             program: batteryGauge.program,
             ledCount: 8
         ).frame(at: (1.0 / 60) + 0.7)
-        precondition(approximately(batteryPreview.colors[0].red, 102.0 / 255))
-        precondition(approximately(batteryPreview.colors[0].green, 1))
-        precondition(approximately(batteryPreview.colors[0].blue, 95.0 / 255))
-        precondition(batteryPreview.colors[4] == .black)
+        precondition(approximately(batteryPreview.colors[0].red, 1))
+        precondition(approximately(batteryPreview.colors[0].green, 159.0 / 255))
+        precondition(approximately(batteryPreview.colors[0].blue, 10.0 / 255))
+        precondition(approximately(batteryPreview.colors[4].red, 77.0 / 255))
+        precondition(approximately(batteryPreview.colors[4].green, 77.0 / 255))
+        precondition(approximately(batteryPreview.colors[4].blue, 77.0 / 255))
 
         var linkedProfile = profile
         var linkedThinking = linkedProfile.style(for: .working)
