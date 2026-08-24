@@ -555,7 +555,7 @@ struct SignalSummaryView: View {
             Text("Signal policy").font(.headline)
             SignalMetric(title: "Active sessions", value: "Always on")
             SignalMetric(title: "Finished sessions", value: "Until acknowledged")
-            SignalMetric(title: "Stuck tool", value: "\(store.selectedProfile.toolTimeoutSeconds.formatted())s")
+            SignalMetric(title: "State source", value: "Explicit events")
             Divider()
             Label("Activity changes state, not position", systemImage: "link")
                 .font(.caption.weight(.medium))

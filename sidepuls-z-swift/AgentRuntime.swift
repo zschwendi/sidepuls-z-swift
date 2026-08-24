@@ -192,7 +192,6 @@ final class NativeAgentRuntime: @unchecked Sendable {
             if now.timeIntervalSince(lastCloudRefresh) >= 15 {
                 refreshCodexCloudLocked(now: now)
             }
-            applyTimingPolicyLocked(now: now)
             publishLocked()
         }
         timer = source
@@ -300,35 +299,6 @@ final class NativeAgentRuntime: @unchecked Sendable {
         }
         sessions = loaded
         publishLocked(force: true)
-    }
-
-    private func applyTimingPolicyLocked(now: Date = .now) {
-        var changed = false
-        for key in Array(sessions.keys) {
-            guard var session = sessions[key] else { continue }
-            let age = max(0, now.timeIntervalSince(session.updatedAt))
-            if session.state == .working,
-               session.eventName == "PostToolUse",
-               policy.postToolHoldSeconds > 0,
-               age >= policy.postToolHoldSeconds {
-                session.state = .completed
-                session.eventName = "PostToolSettled"
-                session.updatedAt = now
-                session.message = "Tool completed"
-                sessions[key] = session
-                changed = true
-            } else if session.state == .toolRunning,
-                      policy.toolTimeoutSeconds > 0,
-                      age >= policy.toolTimeoutSeconds {
-                session.state = .error
-                session.eventName = "ToolTimeout"
-                session.updatedAt = now
-                session.message = "Tool exceeded \(Int(policy.toolTimeoutSeconds)) seconds"
-                sessions[key] = session
-                changed = true
-            }
-        }
-        if changed, ownsSocket { writeLatestStateLocked() }
     }
 
     private func visibleSessionsLocked() -> [AgentSession] {
@@ -517,12 +487,12 @@ private extension NativeAgentRuntime {
         var discovered: [String: AgentSession] = [:]
         var transcriptURLs: [String: URL] = [:]
         let recentURLs = recentCodexTranscriptURLs(now: now)
-        let activeURLs: [URL] = discoveredTranscriptURLs.compactMap { entry -> URL? in
+        let retainedURLs: [URL] = discoveredTranscriptURLs.compactMap { entry -> URL? in
             let (key, url) = entry
-            guard let session = sessions[key], ![AgentState.idle, .completed].contains(session.state) else { return nil }
+            guard let session = sessions[key], shouldContinueTracking(session) else { return nil }
             return url
         }
-        for url in Set(recentURLs + activeURLs) {
+        for url in Set(recentURLs + retainedURLs) {
             guard let session = codexSession(from: url, now: now) else { continue }
             discovered[session.id] = session
             transcriptURLs[session.id] = url
@@ -544,7 +514,7 @@ private extension NativeAgentRuntime {
             }
         }
         discoveredTranscriptURLs = Dictionary(uniqueKeysWithValues: discovered.compactMap { key, session in
-            guard ![AgentState.idle, .completed].contains(session.state) else { return nil }
+            guard shouldContinueTracking(session) else { return nil }
             guard let url = transcriptURLs[key] else { return nil }
             return (key, url)
         })
@@ -554,6 +524,12 @@ private extension NativeAgentRuntime {
             if ownsSocket { writeLatestStateLocked() }
             publishLocked(force: true)
         }
+    }
+
+    func shouldContinueTracking(_ session: AgentSession) -> Bool {
+        if session.state == .idle { return false }
+        if session.state == .completed { return completionAcknowledgements.shouldDisplay(session) }
+        return true
     }
 
     func recentCodexTranscriptURLs(now: Date) -> [URL] {
@@ -715,8 +691,10 @@ private extension NativeAgentRuntime {
 
             if recordType == "event_msg" {
                 switch payload["type"] as? String {
-                case "task_complete", "turn_aborted":
+                case "task_complete":
                     return CodexActivity(state: .completed, eventName: "CodexTurnComplete", toolName: nil)
+                case "turn_aborted":
+                    return CodexActivity(state: .error, eventName: "CodexTurnAborted", toolName: nil)
                 case "task_started":
                     return CodexActivity(state: .working, eventName: "CodexTurnStarted", toolName: nil)
                 default:

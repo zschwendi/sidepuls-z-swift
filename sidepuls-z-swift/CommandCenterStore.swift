@@ -71,7 +71,6 @@ final class CommandCenterStore {
     @ObservationIgnored private var lidMonitor: LidStateMonitor?
     @ObservationIgnored private var batteryMonitor: BatteryStateMonitor?
     @ObservationIgnored private var lastLowBatteryAlertAt: Date?
-    @ObservationIgnored private var codexActivationObserver: NSObjectProtocol?
     @ObservationIgnored private var isShowingPreviewData = true
 
     init() {
@@ -270,9 +269,6 @@ final class CommandCenterStore {
                 self.lidIsClosed = isClosed
                 guard isTransition else { return }
                 self.lastLidTransitionAt = .now
-                if !isClosed {
-                    self.runtime?.acknowledgeCompleted()
-                }
                 let transition = SystemLightingScenes.batteryGauge(
                     chargeFraction: self.batteryState?.chargeFraction ?? 1,
                     ledCount: self.device.ledCount
@@ -301,20 +297,6 @@ final class CommandCenterStore {
         }
         self.runtime = runtime
         runtime.start()
-
-        codexActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard
-                let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                application.bundleIdentifier == "com.openai.codex"
-            else { return }
-            Task { @MainActor [weak self] in
-                self?.runtime?.acknowledgeCompleted()
-            }
-        }
     }
 
     private func handleBatteryUpdate(_ state: BatteryState?) {
