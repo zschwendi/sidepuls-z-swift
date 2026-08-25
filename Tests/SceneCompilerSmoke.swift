@@ -41,6 +41,11 @@ enum SceneCompilerSmoke {
         ])
         precondition(MenuBarDotLayout.sourceIndices(for: .mirroredFour, ledCount: 2) == [[0, 1]])
         precondition(MenuBarDotLayout.sourceIndices(for: .stateSymbol).isEmpty)
+        precondition(SidePulseHardwareController.refreshInterval(for: "off") == nil)
+        precondition(SidePulseHardwareController.refreshInterval(for: "0:#00FF00") == 15)
+        precondition(
+            SidePulseHardwareController.refreshInterval(for: "off\n0:#FF00FF 1s pulse\nrepeat") == 5
+        )
 
         assertSimpleDisplayPolicy(now: now, compiler: compiler)
 

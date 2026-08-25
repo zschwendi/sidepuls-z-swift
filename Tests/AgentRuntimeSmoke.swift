@@ -41,6 +41,7 @@ enum AgentRuntimeSmoke {
         let recoverableID = "runtime-smoke-recoverable-\(UUID().uuidString)"
         let grokHookID = "runtime-smoke-grok-hook-\(UUID().uuidString)"
         let grokBotID = UUID().uuidString
+        let staleHookID = "runtime-smoke-stale-hook-\(UUID().uuidString)"
         let completedURL = transcriptFolder.appending(path: "completed.jsonl")
         try writeTranscript(url: completedURL, id: completedID, payload: ["type": "task_complete"])
         try writeTranscript(url: transcriptFolder.appending(path: "aborted.jsonl"), id: abortedID, payload: [
@@ -57,8 +58,10 @@ enum AgentRuntimeSmoke {
         try writeGrokBotFixture(root: grokBotPersistence, sessionID: grokBotID)
 
         let socketPath = temporaryRoot.appending(path: "events.sock").path
+        let latestStateURL = temporaryRoot.appending(path: "latest.json")
+        try writeLegacyState(url: latestStateURL, staleHookID: staleHookID)
         setenv("SIDEPULSE_EVENT_SOCKET_PATH", socketPath, 1)
-        setenv("SIDEPULSE_LATEST_STATE_PATH", temporaryRoot.appending(path: "latest.json").path, 1)
+        setenv("SIDEPULSE_LATEST_STATE_PATH", latestStateURL.path, 1)
         setenv("CODEX_HOME", codexHome.path, 1)
         setenv("GROK_BOT_PERSISTENCE_PATH", grokBotPersistence.path, 1)
         defer {
@@ -145,6 +148,10 @@ enum AgentRuntimeSmoke {
         precondition(
             agents.contains(where: { $0.sessionID == grokHookID && $0.provider == .grok }),
             "Grok hooks and Grok Bot must remain separate providers"
+        )
+        precondition(
+            !agents.contains(where: { $0.sessionID == staleHookID }),
+            "Abandoned hook activity must not keep the unified signal Thinking forever"
         )
         precondition(
             agents.first(where: { $0.sessionID == toolID })?.openURL?.scheme == "codex",
@@ -296,6 +303,23 @@ enum AgentRuntimeSmoke {
             key: "sidepulse.transcript.replicas.\(sessionID)",
             document: transcript
         )
+    }
+
+    private static func writeLegacyState(url: URL, staleHookID: String) throws {
+        let staleDate = Date.now.addingTimeInterval(-16 * 60)
+        let payload: [String: Any] = [
+            "statuses": [[
+                "provider": "codex",
+                "agent_id": "codex:agent:\(staleHookID)",
+                "display_name": "Abandoned hook fixture",
+                "mode": "working",
+                "updated_at": ISO8601DateFormatter().string(from: staleDate),
+                "event_name": "PostToolUse",
+                "session_id": staleHookID,
+            ]],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        try data.write(to: url, options: .atomic)
     }
 
     private static func writeGrokBotBlob(

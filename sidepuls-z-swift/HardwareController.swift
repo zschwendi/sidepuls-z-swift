@@ -25,6 +25,12 @@ final class SidePulseHardwareController: @unchecked Sendable {
     private var deferredWriteDeadline: Date?
     private let outputDisabledByEnvironment: Bool
 
+    static func refreshInterval(for program: String) -> TimeInterval? {
+        let trimmed = program.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "off" else { return nil }
+        return program.split(whereSeparator: \.isNewline).contains("repeat") ? 5 : 15
+    }
+
     init(kind: SidePulseDeviceKind, onUpdate: @escaping UpdateHandler) {
         self.kind = kind
         queue = DispatchQueue(label: "io.sidepulse.hardware-controller.\(kind.rawValue)")
@@ -165,7 +171,13 @@ final class SidePulseHardwareController: @unchecked Sendable {
         let changed = next != state
         state = next
         if changed { onUpdate(state) }
-        if state.connected, outputEnabled, activePreviewGeneration == nil { tryWriteRequestedLocked() }
+        if state.connected, outputEnabled, activePreviewGeneration == nil {
+            let refreshDue = Self.refreshInterval(for: requestedProgram).map { interval in
+                guard let lastProgramStartedAt else { return true }
+                return Date.now.timeIntervalSince(lastProgramStartedAt) >= interval
+            } ?? false
+            tryWriteRequestedLocked(force: refreshDue)
+        }
     }
 
     private func tryWriteRequestedLocked(force: Bool = false) {

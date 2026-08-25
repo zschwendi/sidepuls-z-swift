@@ -184,6 +184,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
             if now.timeIntervalSince(lastDiscoveryScan) >= 0.75 {
                 discoverCodexSessionsLocked(now: now)
                 discoverGrokBotSessionsLocked(now: now)
+                pruneStaleHookSessionsLocked(now: now)
                 lastDiscoveryScan = now
             }
             if now.timeIntervalSince(lastCloudRefresh) >= 15 {
@@ -632,6 +633,28 @@ private extension NativeAgentRuntime {
             if ownsSocket { writeLatestStateLocked() }
             publishLocked(force: true)
         }
+    }
+
+    func pruneStaleHookSessionsLocked(now: Date) {
+        let discoveryOwnedKeys = discoveredKeys
+            .union(cloudKeys)
+            .union(grokBotDiscoveredKeys)
+        let staleStates: Set<AgentState> = [.idle, .working, .toolRunning]
+        let staleKeys = sessions.compactMap { key, session -> String? in
+            guard !discoveryOwnedKeys.contains(key),
+                  staleStates.contains(session.state),
+                  now.timeIntervalSince(session.updatedAt) > 15 * 60
+            else { return nil }
+            return key
+        }
+        guard !staleKeys.isEmpty else { return }
+
+        for key in staleKeys {
+            sessions[key] = nil
+            hookEventDates[key] = nil
+        }
+        if ownsSocket { writeLatestStateLocked() }
+        publishLocked(force: true)
     }
 
     func grokBotPersistenceKey(for url: URL) -> String? {
