@@ -19,7 +19,7 @@ struct SidePulseCommandCenterApp: App {
         } label: {
             SidePulseMenuBarIcon(
                 store: store,
-                animator: menuBarIconAnimator,
+                animationFrame: menuBarIconAnimator.frame,
                 imageCache: menuBarIconImageCache
             )
         }
@@ -34,23 +34,16 @@ private final class MenuBarIconAnimator: ObservableObject {
     @Published private(set) var frame = 0
     private var timer: Timer?
 
-    func setAnimating(_ shouldAnimate: Bool) {
-        if shouldAnimate {
-            guard timer == nil else { return }
-            let timer = Timer(timeInterval: 1.0 / 12.0, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.frame = (self.frame + 1) % Self.frameCount
-                }
+    init() {
+        let timer = Timer(timeInterval: 1.0 / 12.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.frame = (self.frame + 1) % Self.frameCount
             }
-            timer.tolerance = 0.012
-            RunLoop.main.add(timer, forMode: .common)
-            self.timer = timer
-        } else {
-            timer?.invalidate()
-            timer = nil
-            frame = 0
         }
+        timer.tolerance = 0.012
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 }
 
@@ -85,7 +78,7 @@ private final class MenuBarIconImageCache {
 
 private struct SidePulseMenuBarIcon: View {
     @Bindable var store: CommandCenterStore
-    @ObservedObject var animator: MenuBarIconAnimator
+    let animationFrame: Int
     let imageCache: MenuBarIconImageCache
 
     private var shouldAnimate: Bool {
@@ -96,7 +89,7 @@ private struct SidePulseMenuBarIcon: View {
     var body: some View {
         let colorHex = store.selectedProfile.style(for: store.aggregateState).colorHex
         let image = shouldAnimate
-            ? imageCache.animatedMirroredImage(colorHex: colorHex, frame: animator.frame)
+            ? imageCache.animatedMirroredImage(colorHex: colorHex, frame: animationFrame)
             : MenuBarIconRenderer.image(
                 style: store.menuBarIconStyle,
                 stateSymbol: store.aggregateState.symbol,
@@ -111,10 +104,6 @@ private struct SidePulseMenuBarIcon: View {
             .frame(width: MenuBarIconRenderer.size.width, height: MenuBarIconRenderer.size.height)
             .accessibilityLabel("SidePulse, \(store.aggregateState.title), \(store.menuBarIconStyle.title)")
             .help("SidePulse · \(store.aggregateState.title)")
-            .onAppear { animator.setAnimating(shouldAnimate) }
-            .onChange(of: shouldAnimate) { _, newValue in
-                animator.setAnimating(newValue)
-            }
     }
 }
 
