@@ -262,6 +262,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "SidePulse Command Center";
 				INFOPLIST_KEY_CFBundleName = SidePulse;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSPrefersDisplaySafeAreaCompatibilityMode = NO;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -296,6 +297,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "SidePulse Command Center";
 				INFOPLIST_KEY_CFBundleName = SidePulse;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSPrefersDisplaySafeAreaCompatibilityMode = NO;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

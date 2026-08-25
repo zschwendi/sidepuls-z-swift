@@ -312,7 +312,7 @@ struct SignalModeControl: View {
                     .pickerStyle(.menu)
                 }
 
-                Toggle("Notch status popout", isOn: Binding(
+                Toggle("Dynamic Agent Island", isOn: Binding(
                     get: { store.statusOverlayEnabled },
                     set: { store.setStatusOverlayEnabled($0) }
                 ))
@@ -1182,10 +1182,16 @@ struct ProfileCard: View {
 
 struct AgentsView: View {
     @Bindable var store: CommandCenterStore
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Text("Agent Timeline").font(.largeTitle.bold())
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Agent Timeline").font(.largeTitle.bold())
+                    Text("Every detected session stays available here. Signal Mode only changes the lights.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 RuntimePill(text: store.runtimeMessage)
             }
@@ -1193,23 +1199,106 @@ struct AgentsView: View {
                 Label("No agent is active right now. Codex sessions appear here automatically.", systemImage: "checkmark.circle")
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 4)
+            } else {
+                HStack(spacing: 8) {
+                    Text("\(store.agents.count) SESSION\(store.agents.count == 1 ? "" : "S")")
+                    Text("·")
+                    Text(store.agentDisplayMode == .simple ? "ONE PRIORITIZED LIGHT SIGNAL" : "PER-AGENT LIGHTING")
+                }
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
             }
-            ForEach(store.scene.placementsTopToBottom) { placement in
-                Button {
-                    store.selectAgent(placement.agent)
-                } label: {
-                    HStack(spacing: 16) {
-                        Text(placement.rangeLabel)
-                            .font(.caption.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 78, alignment: .trailing)
-                        AgentCard(agent: placement.agent, profile: store.selectedProfile)
+
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(store.agents) { agent in
+                        Button {
+                            store.selectAgent(agent)
+                        } label: {
+                            AgentTimelineRow(
+                                agent: agent,
+                                profile: store.selectedProfile,
+                                allocationLabel: allocationLabel(for: agent)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open \(agent.name)")
                     }
                 }
-                .buttonStyle(.plain)
+                .padding(.vertical, 2)
             }
-            Spacer()
+            .scrollIndicators(.hidden)
         }
+    }
+
+    private func allocationLabel(for agent: AgentSession) -> String {
+        guard store.agentDisplayMode == .perAgent else { return "IN HUB" }
+        return store.scene.placementsTopToBottom
+            .first(where: { $0.agent.id == agent.id })?
+            .rangeLabel
+            ?? "NOT LIT"
+    }
+}
+
+private struct AgentTimelineRow: View {
+    let agent: AgentSession
+    let profile: LightingProfile
+    let allocationLabel: String
+
+    private var color: Color { Color(hex: profile.style(for: agent.state).colorHex) }
+
+    var body: some View {
+        HStack(spacing: 15) {
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(allocationLabel)
+                    .font(.caption2.monospacedDigit().weight(.bold))
+                    .foregroundStyle(color)
+                Text(agent.provider.title.uppercased())
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(width: 72, alignment: .trailing)
+
+            Image(systemName: agent.state.symbol)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 42, height: 42)
+                .background(color.opacity(0.13), in: .rect(cornerRadius: 13))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(agent.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(agent.project)
+                    Text("·")
+                    Text(agent.state.title)
+                    Text("·")
+                    Text(agent.updatedAt, style: .relative)
+                        .monospacedDigit()
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(agent.state.title.uppercased())
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(color)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(color.opacity(0.1), in: .capsule)
+
+            Image(systemName: "arrow.up.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 72)
+        .contentShape(.rect)
+        .glassEffect(.regular.tint(color.opacity(0.07)).interactive(), in: .rect(cornerRadius: 20))
     }
 }
 

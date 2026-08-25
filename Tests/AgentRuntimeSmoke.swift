@@ -24,6 +24,7 @@ private final class RuntimeProbe: @unchecked Sendable {
 enum AgentRuntimeSmoke {
     static func main() throws {
         testCompletionAcknowledgements()
+        testGrokBotInferenceStability()
 
         let temporaryRoot = URL(
             fileURLWithPath: "/tmp/sidepulse-runtime-smoke-\(UUID().uuidString.prefix(8))",
@@ -303,6 +304,65 @@ enum AgentRuntimeSmoke {
             key: "sidepulse.transcript.replicas.\(sessionID)",
             document: transcript
         )
+    }
+
+    private static func testGrokBotInferenceStability() {
+        let runtime = NativeAgentRuntime { _, _, _ in }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+        func milliseconds(_ date: Date) -> Int {
+            Int(date.timeIntervalSince1970 * 1_000)
+        }
+
+        func responseTranscript(at date: Date, persistedAt: Date? = nil) -> [String: Any] {
+            [
+                "value": [
+                    "persistedAt": milliseconds(persistedAt ?? date),
+                    "entries": [[
+                        "kind": "send-message",
+                        "timestampMs": milliseconds(date),
+                        "message": ["type": "text", "content": "fixture"],
+                    ]],
+                ],
+            ]
+        }
+
+        let chunkPause = now.addingTimeInterval(-12)
+        let active = runtime.inferGrokBotActivity(
+            row: ["lastActivityAt": milliseconds(chunkPause), "hasUnread": false],
+            transcript: responseTranscript(at: chunkPause),
+            now: now
+        )
+        precondition(
+            active.state == .working,
+            "Grok Bot must remain active across normal pauses between response chunks"
+        )
+
+        let settledAt = now.addingTimeInterval(-31)
+        let settled = runtime.inferGrokBotActivity(
+            row: ["lastActivityAt": milliseconds(settledAt), "hasUnread": false],
+            transcript: responseTranscript(at: settledAt),
+            now: now
+        )
+        precondition(settled.state == .completed, "Quiet Grok Bot responses must settle to Done")
+
+        let oldActivity = now.addingTimeInterval(-60 * 60)
+        let rewritten = runtime.inferGrokBotActivity(
+            row: ["lastActivityAt": milliseconds(oldActivity), "hasUnread": false],
+            transcript: responseTranscript(at: oldActivity, persistedAt: now),
+            now: now
+        )
+        precondition(
+            rewritten.state == .completed && rewritten.updatedAt == oldActivity,
+            "A persistence rewrite must not make an old Grok Bot session active again"
+        )
+
+        let unread = runtime.inferGrokBotActivity(
+            row: ["lastActivityAt": milliseconds(now), "hasUnread": true],
+            transcript: responseTranscript(at: now),
+            now: now
+        )
+        precondition(unread.state == .completed, "Unread Grok Bot output is explicit completion evidence")
     }
 
     private static func writeLegacyState(url: URL, staleHookID: String) throws {

@@ -696,6 +696,9 @@ private extension NativeAgentRuntime {
         return document
     }
 
+}
+
+extension NativeAgentRuntime {
     func inferGrokBotActivity(
         row: [String: Any],
         transcript: [String: Any]?,
@@ -703,22 +706,25 @@ private extension NativeAgentRuntime {
     ) -> GrokBotActivity {
         let rowUpdatedAt = grokBotDate(in: row, keys: ["lastActivityAt", "updatedAt"]) ?? .distantPast
         let transcriptValue = transcript?["value"] as? [String: Any]
-        let persistedAt = transcriptValue.flatMap { grokBotDate(in: $0, keys: ["persistedAt"]) }
         let entries = transcriptValue?["entries"] as? [[String: Any]] ?? []
+        let latest = entries.reversed().first(where: { entry in
+            let kind = string(in: entry, keys: ["kind", "type"])?.lowercased() ?? ""
+            return kind == "message" || kind == "send-message" || kind.contains("tool")
+                || kind.contains("command") || kind.contains("permission")
+        })
+        let latestMessage = latest?["message"] as? [String: Any]
+        let latestTimestamp = latest.flatMap { grokBotDate(in: $0, keys: ["timestampMs", "createdAt"]) }
+        let updatedAt = [rowUpdatedAt, latestTimestamp].compactMap { $0 }.max() ?? now
 
         if row["awaitingUserResponse"] as? Bool == true || grokBotHasPendingPermission(entries) {
             return GrokBotActivity(
                 state: .waiting,
                 eventName: "GrokBotNeedsApproval",
                 toolName: "Waiting for you",
-                updatedAt: [rowUpdatedAt, persistedAt].compactMap { $0 }.max() ?? now
+                updatedAt: updatedAt
             )
         }
 
-        let latest = entries.last
-        let latestMessage = latest?["message"] as? [String: Any]
-        let latestTimestamp = latest.flatMap { grokBotDate(in: $0, keys: ["timestampMs", "createdAt"]) }
-        let updatedAt = [rowUpdatedAt, persistedAt, latestTimestamp].compactMap { $0 }.max() ?? now
         let isStreaming = latest?["isStreaming"] as? Bool == true
             || latestMessage?["isStreaming"] as? Bool == true
         if isStreaming {
@@ -734,16 +740,43 @@ private extension NativeAgentRuntime {
             string(in: latest ?? [:], keys: ["kind", "type"]),
             string(in: latestMessage ?? [:], keys: ["type", "kind"]),
         ].compactMap { $0 }.joined(separator: " ").lowercased()
-        if latestKind.contains("tool") || latestKind.contains("command") {
+        let latestRole = string(in: latest ?? [:], keys: ["role"])?.lowercased()
+        let age = max(0, now.timeIntervalSince(updatedAt))
+
+        if latestKind.contains("error") || latestKind.contains("failed") {
             return GrokBotActivity(
-                state: now.timeIntervalSince(updatedAt) <= 8 ? .toolRunning : .completed,
-                eventName: "GrokBotToolActivity",
-                toolName: "Tool",
+                state: .error,
+                eventName: "GrokBotFailed",
+                toolName: nil,
                 updatedAt: updatedAt
             )
         }
 
-        let state: AgentState = now.timeIntervalSince(updatedAt) <= 8 ? .working : .completed
+        if latestRole == "user" {
+            let state: AgentState = age <= 15 * 60 ? .working : .completed
+            return GrokBotActivity(
+                state: state,
+                eventName: state == .working ? "GrokBotWorking" : "GrokBotTurnComplete",
+                toolName: nil,
+                updatedAt: updatedAt
+            )
+        }
+
+        let responseIsUnread = row["hasUnread"] as? Bool == true
+        if latestKind.contains("tool") || latestKind.contains("command") {
+            let state: AgentState = responseIsUnread || age > 30 ? .completed : .toolRunning
+            return GrokBotActivity(
+                state: state,
+                eventName: state == .completed ? "GrokBotTurnComplete" : "GrokBotToolActivity",
+                toolName: state == .completed ? nil : "Tool",
+                updatedAt: updatedAt
+            )
+        }
+
+        // Grok Bot persists response chunks but does not persist a dedicated turn-finished flag.
+        // Keep the turn active across normal pauses between chunks, then settle only after the
+        // transcript has been quiet. An unread response is explicit completion evidence.
+        let state: AgentState = responseIsUnread || age > 30 ? .completed : .working
         return GrokBotActivity(
             state: state,
             eventName: state == .working ? "GrokBotWorking" : "GrokBotTurnComplete",
@@ -751,6 +784,10 @@ private extension NativeAgentRuntime {
             updatedAt: updatedAt
         )
     }
+
+}
+
+private extension NativeAgentRuntime {
 
     func grokBotHasPendingPermission(_ entries: [[String: Any]]) -> Bool {
         for entry in entries.reversed() {
@@ -1197,7 +1234,7 @@ private struct GrokBotCachedDocument {
     var document: [String: Any]
 }
 
-private struct GrokBotActivity {
+struct GrokBotActivity {
     var state: AgentState
     var eventName: String
     var toolName: String?

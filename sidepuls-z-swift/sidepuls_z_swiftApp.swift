@@ -338,7 +338,7 @@ struct SidePulseMenuBarView: View {
                 get: { store.statusOverlayEnabled },
                 set: { store.setStatusOverlayEnabled($0) }
             )) {
-                Label("Status popout under notch", systemImage: "macbook")
+                Label("Dynamic Agent Island", systemImage: "macbook")
                     .font(.caption.weight(.medium))
             }
             .toggleStyle(.switch)

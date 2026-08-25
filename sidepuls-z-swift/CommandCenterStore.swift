@@ -93,8 +93,9 @@ final class CommandCenterStore {
     @ObservationIgnored private var lastLowBatteryAlertAt: Date?
     @ObservationIgnored private var isShowingPreviewData = true
     @ObservationIgnored private var lastOutputStates: [String: AgentState] = [:]
-    @ObservationIgnored private var lastPublishedOverlayState: AgentState?
+    @ObservationIgnored private var lastPublishedOverlaySignal: SidePulseStatusOverlaySignal?
     @ObservationIgnored private var profileSelectionObserver: NSObjectProtocol?
+    @ObservationIgnored private var agentSpaceSelectionObserver: NSObjectProtocol?
     @ObservationIgnored private var focusMonitor: Timer?
     @ObservationIgnored private var hasObservedFocusContext = false
     @ObservationIgnored private var lastObservedFocusProfileID: UUID?
@@ -348,6 +349,7 @@ final class CommandCenterStore {
         )
         scene = proDevice.connected || !dotDevice.connected ? proScene : dotScene
         syncHardwareOutput()
+        if !isShowingPreviewData { publishStatusOverlayIfNeeded() }
     }
 
     func previewSelectedState() {
@@ -446,6 +448,19 @@ final class CommandCenterStore {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.reloadProfileSelection()
+            }
+        }
+        agentSpaceSelectionObserver = NotificationCenter.default.addObserver(
+            forName: .sidePulseAgentSpaceSelectAgent,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let agentID = notification.object as? String else { return }
+            Task { @MainActor [weak self] in
+                guard let self,
+                      let agent = self.agents.first(where: { $0.id == agentID })
+                else { return }
+                self.selectAgent(agent)
             }
         }
 
@@ -629,13 +644,26 @@ final class CommandCenterStore {
     private func publishStatusOverlayIfNeeded(force: Bool = false) {
         guard statusOverlayEnabled else { return }
         let state = aggregateState
-        guard force || state != lastPublishedOverlayState else { return }
-        lastPublishedOverlayState = state
         let signal = SidePulseStatusOverlaySignal(
             state: state,
             colorHex: selectedProfile.style(for: state).colorHex,
-            sessionCount: agents.count
+            agents: agents.map { agent in
+                let displayedState: AgentState = agentDisplayMode == .simple && agent.state == .toolRunning
+                    ? .working
+                    : agent.state
+                return SidePulseAgentSpaceItem(
+                    id: agent.id,
+                    name: agent.name,
+                    project: agent.project,
+                    provider: agent.provider,
+                    state: displayedState,
+                    colorHex: selectedProfile.style(for: displayedState).colorHex,
+                    updatedAt: agent.updatedAt
+                )
+            }
         )
+        guard force || signal != lastPublishedOverlaySignal else { return }
+        lastPublishedOverlaySignal = signal
         NotificationCenter.default.post(
             name: .sidePulseStatusOverlaySignalDidChange,
             object: signal
