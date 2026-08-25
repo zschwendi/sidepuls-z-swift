@@ -25,8 +25,10 @@ enum AgentRuntimeSmoke {
     static func main() throws {
         testCompletionAcknowledgements()
 
-        let temporaryRoot = FileManager.default.temporaryDirectory
-            .appending(path: "sidepulse-runtime-smoke-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let temporaryRoot = URL(
+            fileURLWithPath: "/tmp/sidepulse-runtime-smoke-\(UUID().uuidString.prefix(8))",
+            isDirectory: true
+        )
         try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: temporaryRoot) }
 
@@ -36,6 +38,7 @@ enum AgentRuntimeSmoke {
         let completedID = "runtime-smoke-completed-\(UUID().uuidString)"
         let abortedID = "runtime-smoke-aborted-\(UUID().uuidString)"
         let toolID = "runtime-smoke-tool-\(UUID().uuidString)"
+        let recoverableID = "runtime-smoke-recoverable-\(UUID().uuidString)"
         let completedURL = transcriptFolder.appending(path: "completed.jsonl")
         try writeTranscript(url: completedURL, id: completedID, payload: ["type": "task_complete"])
         try writeTranscript(url: transcriptFolder.appending(path: "aborted.jsonl"), id: abortedID, payload: [
@@ -49,7 +52,8 @@ enum AgentRuntimeSmoke {
             payload: ["type": "custom_tool_call", "name": "exec"]
         )
 
-        setenv("SIDEPULSE_EVENT_SOCKET_PATH", temporaryRoot.appending(path: "events.sock").path, 1)
+        let socketPath = temporaryRoot.appending(path: "events.sock").path
+        setenv("SIDEPULSE_EVENT_SOCKET_PATH", socketPath, 1)
         setenv("SIDEPULSE_LATEST_STATE_PATH", temporaryRoot.appending(path: "latest.json").path, 1)
         setenv("CODEX_HOME", codexHome.path, 1)
         defer {
@@ -73,6 +77,29 @@ enum AgentRuntimeSmoke {
         runtime.start()
         let result = detected.wait(timeout: .now() + 3)
         precondition(result == .success, "Expected deterministic local Codex fixtures")
+
+        try sendHook(
+            path: socketPath,
+            eventName: "PostToolUse",
+            sessionID: recoverableID,
+            toolResponse: ["isError": false, "output": "error.log failed string in successful output"]
+        )
+        precondition(
+            waitForState(probe: probe, sessionID: recoverableID, state: .working),
+            "Successful tool output containing failure words must remain Thinking"
+        )
+        for eventName in ["PostToolUseFailure", "PermissionDenied", "StopFailure"] {
+            try sendHook(
+                path: socketPath,
+                eventName: eventName,
+                sessionID: recoverableID,
+                toolResponse: ["isError": true, "output": "The tool failed"]
+            )
+            precondition(
+                waitForState(probe: probe, sessionID: recoverableID, state: .working),
+                "\(eventName) is recoverable and must not turn the run red"
+            )
+        }
 
         try FileManager.default.setAttributes(
             [.modificationDate: Date.now.addingTimeInterval(-20 * 60)],
@@ -110,7 +137,65 @@ enum AgentRuntimeSmoke {
             agents.first(where: { $0.provider == .codex })?.openURL?.scheme == "codex",
             "Local Codex sessions must expose a selectable desktop deep link"
         )
-        print("Agent runtime smoke passed: explicit states persist until explicit acknowledgement")
+        print("Agent runtime smoke passed: terminal aborts stay red and recoverable tool failures stay Thinking")
+    }
+
+    private static func waitForState(
+        probe: RuntimeProbe,
+        sessionID: String,
+        state: AgentState,
+        timeout: TimeInterval = 2
+    ) -> Bool {
+        let deadline = Date.now.addingTimeInterval(timeout)
+        while Date.now < deadline {
+            if probe.snapshot().0.contains(where: { $0.sessionID == sessionID && $0.state == state }) {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.025)
+        }
+        return false
+    }
+
+    private static func sendHook(
+        path: String,
+        eventName: String,
+        sessionID: String,
+        toolResponse: [String: Any]
+    ) throws {
+        let payload: [String: Any] = [
+            "provider": "codex",
+            "line": [
+                "hook_event_name": eventName,
+                "session_id": sessionID,
+                "cwd": "/tmp/SidePulse",
+                "logged_at": ISO8601DateFormatter().string(from: .now),
+                "tool_name": "Smoke Tool",
+                "tool_response": toolResponse,
+            ],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        let client = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        precondition(client >= 0, "Expected a Unix socket client")
+        defer { Darwin.close(client) }
+
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let bytes = Array(path.utf8) + [0]
+        precondition(bytes.count <= MemoryLayout.size(ofValue: address.sun_path))
+        withUnsafeMutableBytes(of: &address.sun_path) { destination in
+            destination.initializeMemory(as: UInt8.self, repeating: 0)
+            destination.copyBytes(from: bytes)
+        }
+        let connected = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(client, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        precondition(connected == 0, "Expected the runtime event socket to accept hooks")
+        let written = data.withUnsafeBytes { bytes in
+            Darwin.write(client, bytes.baseAddress, bytes.count)
+        }
+        precondition(written == data.count, "Expected the complete hook payload to be written")
     }
 
     private static func datedTranscriptFolder(codexHome: URL, date: Date) -> URL {

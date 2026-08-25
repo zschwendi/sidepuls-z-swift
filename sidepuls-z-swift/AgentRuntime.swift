@@ -825,12 +825,13 @@ private extension NativeAgentRuntime {
             return explicit
         }
         switch event {
-        case "PostToolUseFailure", "PermissionDenied", "StopFailure": return .error
         case "PermissionRequest": return .waiting
         case "PreToolUse": return .toolRunning
-        case "PostToolUse":
-            let response = String(describing: raw["tool_response"] ?? raw["toolResponse"] ?? "").lowercased()
-            return response.contains("error") || response.contains("failed") ? .error : .working
+        case "PostToolUse", "PostToolUseFailure", "PermissionDenied", "StopFailure":
+            // Tool failures and denied permissions are recoverable turn events. The
+            // agent decides whether to retry or take another path, so they must not
+            // impersonate a terminal run failure on the physical array.
+            return .working
         case "UserPromptSubmit", "PreCompact", "PostCompact", "SubagentStart": return .working
         case "Stop", "SubagentStop": return asksConcreteQuestion(message) ? .waiting : .completed
         case "SessionEnd": return .completed
