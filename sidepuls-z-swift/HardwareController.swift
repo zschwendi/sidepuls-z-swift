@@ -65,12 +65,16 @@ final class SidePulseHardwareController: @unchecked Sendable {
     ) {
         queue.async { [weak self] in
             guard let self else { return }
+            let calibratedProgram = LEDProgramOutputCalibration.scalingBrightness(
+                in: program,
+                by: kind.outputBrightnessScale
+            )
             let wasEnabled = outputEnabled
             let enabledChanged = enabled != outputEnabled
-            let programChanged = program != requestedProgram
+            let programChanged = calibratedProgram != requestedProgram
             guard enabledChanged || programChanged else { return }
             outputEnabled = enabled
-            requestedProgram = program
+            requestedProgram = calibratedProgram
             if !enabled {
                 cancelPreviewLocked()
                 cancelDeferredWriteLocked()
@@ -106,13 +110,17 @@ final class SidePulseHardwareController: @unchecked Sendable {
     func preview(program: String, duration: TimeInterval = 3) {
         queue.async { [weak self] in
             guard let self, state.connected else { return }
+            let calibratedProgram = LEDProgramOutputCalibration.scalingBrightness(
+                in: program,
+                by: kind.outputBrightnessScale
+            )
             cancelDeferredWriteLocked()
             previewGeneration += 1
             let generation = previewGeneration
             let previewPath = state.path
             activePreviewGeneration = generation
             do {
-                try writeLocked(program, remember: false)
+                try writeLocked(calibratedProgram, remember: false)
             } catch {
                 activePreviewGeneration = nil
                 recordErrorLocked(error)

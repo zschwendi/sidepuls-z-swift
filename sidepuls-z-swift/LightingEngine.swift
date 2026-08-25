@@ -1,5 +1,23 @@
 import Foundation
 
+enum LEDProgramOutputCalibration {
+    static func scalingBrightness(in program: String, by scale: Double) -> String {
+        let clampedScale = max(0, min(1, scale))
+        guard clampedScale < 1, program != "off" else { return program }
+
+        var lines = program.components(separatedBy: "\n")
+        if let brightnessIndex = lines.firstIndex(where: { $0.hasPrefix("brightness ") }),
+           let brightness = Int(lines[brightnessIndex].dropFirst("brightness ".count)) {
+            let calibrated = Int((Double(brightness) * clampedScale).rounded())
+            lines[brightnessIndex] = "brightness \(max(0, min(255, calibrated)))"
+        } else {
+            let calibrated = Int((255 * clampedScale).rounded())
+            lines.insert("brightness \(calibrated)", at: 0)
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
 struct AdaptiveOccupancyAllocator: Sendable {
     private(set) var residentOrder: [String] = []
 

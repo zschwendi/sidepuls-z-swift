@@ -244,6 +244,25 @@ enum SceneCompilerSmoke {
         precondition(SidePulseDeviceKind.detected(fromVolumeName: "PulseDot") == .dot)
         precondition(SidePulseDeviceKind.detected(fromVolumeName: "SidePulse Dot") == .dot)
         precondition(SidePulseDeviceKind.detected(fromVolumeName: "Macintosh HD") == nil)
+        precondition(SidePulseDeviceKind.pro.outputBrightnessScale == 1)
+        precondition(SidePulseDeviceKind.dot.outputBrightnessScale == 0.4)
+        precondition(
+            LEDProgramOutputCalibration.scalingBrightness(
+                in: "brightness 183\n0:#00B300;1:#000000",
+                by: SidePulseDeviceKind.dot.outputBrightnessScale
+            ) == "brightness 73\n0:#00B300;1:#000000"
+        )
+        precondition(
+            LEDProgramOutputCalibration.scalingBrightness(
+                in: "0:#FFFFFF;1:#FFFFFF",
+                by: SidePulseDeviceKind.dot.outputBrightnessScale
+            ) == "brightness 102\n0:#FFFFFF;1:#FFFFFF"
+        )
+        precondition(LEDProgramOutputCalibration.scalingBrightness(in: "off", by: 0.4) == "off")
+        precondition(
+            LEDProgramOutputCalibration.scalingBrightness(in: batteryGauge.program, by: 0.4)
+                .hasPrefix("brightness 102\n")
+        )
 
         var proMirrorAllocator = StableSlotAllocator()
         var dotMirrorAllocator = StableSlotAllocator()

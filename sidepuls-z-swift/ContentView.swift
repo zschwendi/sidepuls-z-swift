@@ -1137,7 +1137,7 @@ struct HardwareDeviceCard: View {
                     .foregroundStyle(.secondary)
                 Text(device.ledCount == 8
                     ? "Eight-LED scene stays unchanged as the primary output."
-                    : "Bottom and top dots stay phase-locked to the Pro sweep.")
+                    : "40% optical calibration · phase-locked to the Pro sweep.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if device.connected {
