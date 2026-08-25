@@ -859,40 +859,169 @@ struct InspectorSlider: View {
 
 struct ProfilesView: View {
     @Bindable var store: CommandCenterStore
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                Text("Lighting Profiles").font(.largeTitle.bold())
-                Spacer()
-                Picker("Array mode", selection: Binding(
-                    get: { store.selectedProfile.strategy },
-                    set: { strategy in store.updateSelectedProfile { $0.strategy = strategy } }
-                )) {
-                    ForEach(SlotStrategy.allCases) { strategy in
-                        Text(strategy.title).tag(strategy)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Lighting Profiles").font(.largeTitle.bold())
+                        Text("Build a setup for each part of your day, then switch it manually or with Focus.")
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Import", systemImage: "square.and.arrow.down") { store.importProfiles() }
+                        .buttonStyle(.glass)
+                    Button("Export", systemImage: "square.and.arrow.up") { store.exportProfiles() }
+                        .buttonStyle(.glass)
+                    Button("New Profile", systemImage: "plus") { store.createProfile() }
+                        .buttonStyle(.glassProminent)
+                }
+
+                HStack(alignment: .top, spacing: 18) {
+                    SelectedProfileEditor(store: store)
+                    FocusProfileCard(store: store)
+                }
+
+                if let message = store.profileTransferMessage {
+                    Label(
+                        message,
+                        systemImage: store.profileTransferFailed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
+                    )
+                        .font(.callout)
+                        .foregroundStyle(store.profileTransferFailed ? Color.red : Color.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("YOUR PROFILES")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    LazyVGrid(columns: [.init(.adaptive(minimum: 270), spacing: 16)], spacing: 16) {
+                        ForEach(store.profiles) { profile in
+                            ProfileCard(
+                                profile: profile,
+                                selected: profile.id == store.selectedProfileID,
+                                isDefault: profile.id == store.defaultProfileID
+                            ) {
+                                store.selectProfile(profile.id)
+                            }
+                        }
                     }
                 }
-                .frame(width: 190)
-                Button("Duplicate", systemImage: "plus.square.on.square") { store.duplicateSelectedProfile() }
-                    .buttonStyle(.glass)
-                Button("New Profile", systemImage: "plus") { store.createProfile() }
-                    .buttonStyle(.glassProminent)
             }
-            LazyVGrid(columns: [.init(.adaptive(minimum: 260), spacing: 16)], spacing: 16) {
-                ForEach(store.profiles) { profile in
-                    ProfileCard(profile: profile, selected: profile.id == store.selectedProfileID) {
-                        store.selectProfile(profile.id)
-                    }
-                }
-            }
-            Spacer()
+            .padding(.bottom, 24)
         }
+        .scrollIndicators(.hidden)
+    }
+}
+
+struct SelectedProfileEditor: View {
+    @Bindable var store: CommandCenterStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label("Selected Profile", systemImage: store.selectedProfile.symbol)
+                    .font(.headline)
+                Spacer()
+                if store.selectedProfileID == store.defaultProfileID {
+                    Text("DEFAULT FALLBACK")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.cyan)
+                }
+            }
+
+            TextField("Profile name", text: Binding(
+                get: { store.selectedProfile.name },
+                set: { store.renameSelectedProfile($0) }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.title3.weight(.semibold))
+
+            Picker("Array layout", selection: Binding(
+                get: { store.selectedProfile.strategy },
+                set: { strategy in store.updateSelectedProfile { $0.strategy = strategy } }
+            )) {
+                ForEach(SlotStrategy.allCases) { strategy in
+                    Text(strategy.title).tag(strategy)
+                }
+            }
+
+            HStack {
+                Button("Duplicate", systemImage: "plus.square.on.square") {
+                    store.duplicateSelectedProfile()
+                }
+                .buttonStyle(.glass)
+
+                Button("Delete", systemImage: "trash", role: .destructive) {
+                    store.deleteSelectedProfile()
+                }
+                .buttonStyle(.glass)
+                .disabled(store.selectedProfileID == store.defaultProfileID || store.profiles.count == 1)
+
+                Spacer()
+                Text("Tune colors and motion in Lighting Studio")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular.tint(.cyan.opacity(0.07)), in: .rect(cornerRadius: 26))
+    }
+}
+
+struct FocusProfileCard: View {
+    @Bindable var store: CommandCenterStore
+
+    private var activeProfileName: String? {
+        guard let activeID = store.activeFocusProfileID else { return nil }
+        return store.profiles.first(where: { $0.id == activeID })?.name
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Focus Automation", systemImage: "moon.circle.fill")
+                    .font(.headline)
+                Spacer()
+                if let activeProfileName {
+                    Text("\(activeProfileName.uppercased()) ACTIVE")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.purple)
+                } else if store.focusAutomationEnabled {
+                    Text("AUTOMATION READY")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.green)
+                }
+            }
+
+            Text("Add SidePulse as a Focus Filter, then choose a profile inside each Focus—School, Sleep, Work, or anything else you create.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(activeProfileName == nil
+                 ? "When no configured Focus is active, SidePulse returns to Default."
+                 : "This Focus is currently controlling SidePulse.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button("Open Focus Settings", systemImage: "arrow.up.forward.app") {
+                store.openFocusSettings()
+            }
+            .buttonStyle(.glassProminent)
+        }
+        .padding(20)
+        .frame(width: 390, alignment: .leading)
+        .glassEffect(.regular.tint(.purple.opacity(0.08)), in: .rect(cornerRadius: 26))
     }
 }
 
 struct ProfileCard: View {
     let profile: LightingProfile
     let selected: Bool
+    let isDefault: Bool
     let action: () -> Void
     var body: some View {
         Button(action: action) {
@@ -900,6 +1029,11 @@ struct ProfileCard: View {
                 HStack {
                     Image(systemName: profile.symbol).font(.title2)
                     Spacer()
+                    if isDefault {
+                        Text("DEFAULT")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
                     if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
                 }
                 Text(profile.name).font(.title3.bold())

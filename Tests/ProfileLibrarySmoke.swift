@@ -33,9 +33,13 @@ enum ProfileLibrarySmoke {
         defaults.set(try JSONSerialization.data(withJSONObject: legacyLibrary), forKey: "sidepulse.profile-library.v1")
 
         let migrated = try require(ProfileLibrary.load(from: defaults))
-        precondition(migrated.schemaVersion == 8)
+        precondition(migrated.schemaVersion == 9)
+        precondition(migrated.profiles.count == 1)
+        precondition(migrated.profiles[0].name == "Default")
+        precondition(migrated.selectedProfileID == builtIn.id)
+        precondition(ProfileLibrary.defaultProfileID(from: defaults) == builtIn.id)
         precondition(migrated.profiles.first(where: { $0.id == builtIn.id })?.style(for: .working).motion == .breathe)
-        precondition(migrated.profiles.first(where: { $0.id == custom.id })?.style(for: .working).motion == .pulse)
+        precondition(!migrated.profiles.contains(where: { $0.id == custom.id }))
         precondition(
             migrated.profiles.first(where: { $0.id == builtIn.id })?.styles.filter { $0.state == .working }.count == 1
         )
@@ -43,7 +47,50 @@ enum ProfileLibrarySmoke {
         precondition(migratedBuiltIn.style(for: .toolRunning).motion == migratedBuiltIn.style(for: .working).motion)
         precondition(migratedBuiltIn.style(for: .toolRunning).cycleSeconds == migratedBuiltIn.style(for: .working).cycleSeconds)
         precondition(migratedBuiltIn.style(for: .toolRunning).intensity == migratedBuiltIn.style(for: .working).intensity)
-        print("Profile library smoke passed: Thinking and Tool motion stay linked through migration")
+
+        let archiveData = try ProfileLibrary.exportData(profiles: migrated.profiles)
+        let imported = try ProfileLibrary.importProfiles(from: archiveData)
+        precondition(imported == migrated.profiles)
+
+        let currentSuiteName = "sidepulse.profile-current-smoke.\(UUID().uuidString)"
+        let currentDefaults = UserDefaults(suiteName: currentSuiteName)!
+        defer { currentDefaults.removePersistentDomain(forName: currentSuiteName) }
+        var exactCurrent = LightingProfile.commandCenter
+        exactCurrent.name = "My Current Setup"
+        exactCurrent.deviceBrightness = 0.613
+        var thinking = exactCurrent.style(for: .working)
+        thinking.colorHex = "#C71585"
+        thinking.cycleSeconds = 1.037
+        thinking.intensity = 0.417
+        exactCurrent.updateStyle(thinking)
+        let schemaEight = SavedProfileLibrary(
+            schemaVersion: 8,
+            profiles: [.quietNight, exactCurrent, .highSignal],
+            selectedProfileID: exactCurrent.id
+        )
+        currentDefaults.set(try JSONEncoder().encode(schemaEight), forKey: "sidepulse.profile-library.v1")
+
+        let collapsed = try require(ProfileLibrary.load(from: currentDefaults))
+        precondition(collapsed.profiles.count == 1)
+        precondition(collapsed.profiles[0].name == "Default")
+        precondition(collapsed.profiles[0].deviceBrightness == exactCurrent.deviceBrightness)
+        precondition(collapsed.profiles[0].styles == exactCurrent.styles)
+        precondition(ProfileLibrary.selectProfile(exactCurrent.id, in: currentDefaults))
+        ProfileLibrary.setFocusAutomationEnabled(true, in: currentDefaults)
+        precondition(ProfileLibrary.focusAutomationEnabled(from: currentDefaults))
+
+        let duplicateArchive = SidePulseProfileArchive(profiles: [exactCurrent, exactCurrent])
+        let duplicateEncoder = JSONEncoder()
+        duplicateEncoder.dateEncodingStrategy = .iso8601
+        let duplicateData = try duplicateEncoder.encode(duplicateArchive)
+        do {
+            _ = try ProfileLibrary.importProfiles(from: duplicateData)
+            preconditionFailure("Duplicate profile IDs should be rejected")
+        } catch ProfileArchiveError.duplicateIdentifiers {
+            // Expected.
+        }
+
+        print("Profile library smoke passed: current settings become Default, presets are removed, and JSON round-trips")
     }
 
     private static func require<T>(_ value: T?) throws -> T {

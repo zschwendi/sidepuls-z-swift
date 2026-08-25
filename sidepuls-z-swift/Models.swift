@@ -328,7 +328,7 @@ struct LightingProfile: Identifiable, Codable, Hashable, Sendable {
 extension LightingProfile {
     static let commandCenter = LightingProfile(
         id: UUID(uuidString: "1B91F090-339B-4C53-8DD2-74FF1F1E0611")!,
-        name: "Command Center",
+        name: "Default",
         symbol: "command",
         strategy: .adaptiveOccupancy,
         deviceBrightness: 0.72,

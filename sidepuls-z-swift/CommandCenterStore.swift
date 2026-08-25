@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import UniformTypeIdentifiers
 
 enum CommandCenterSection: String, CaseIterable, Identifiable {
     case overview, lighting, profiles, agents, hardware, system, diagnostics
@@ -35,7 +36,7 @@ enum CommandCenterSection: String, CaseIterable, Identifiable {
 @Observable
 final class CommandCenterStore {
     var selectedSection: CommandCenterSection = .overview
-    var profiles: [LightingProfile] = [.commandCenter, .quietNight, .highSignal]
+    var profiles: [LightingProfile] = [.commandCenter]
     var selectedProfileID = LightingProfile.commandCenter.id
     var selectedState: AgentState = .working
     var selectedAgentID: String?
@@ -56,6 +57,10 @@ final class CommandCenterStore {
     var lidIsClosed: Bool?
     var lastLidTransitionAt: Date?
     var scene = CompiledScene(program: "", slots: [])
+    var profileTransferMessage: String?
+    var profileTransferFailed = false
+    var focusAutomationEnabled = ProfileLibrary.focusAutomationEnabled()
+    var activeFocusProfileID: UUID?
     var liveOutputEnabled = AppPreferences.liveOutputEnabled() {
         didSet {
             AppPreferences.saveLiveOutputEnabled(liveOutputEnabled)
@@ -73,6 +78,10 @@ final class CommandCenterStore {
     @ObservationIgnored private var lastLowBatteryAlertAt: Date?
     @ObservationIgnored private var isShowingPreviewData = true
     @ObservationIgnored private var lastOutputStates: [String: AgentState] = [:]
+    @ObservationIgnored private var profileSelectionObserver: NSObjectProtocol?
+    @ObservationIgnored private var focusMonitor: Timer?
+    @ObservationIgnored private var hasObservedFocusContext = false
+    @ObservationIgnored private var lastObservedFocusProfileID: UUID?
 
     init() {
         if let saved = ProfileLibrary.load(), !saved.profiles.isEmpty {
@@ -80,6 +89,10 @@ final class CommandCenterStore {
             selectedProfileID = saved.profiles.contains(where: { $0.id == saved.selectedProfileID })
                 ? saved.selectedProfileID
                 : saved.profiles[0].id
+        } else {
+            let initialProfile = LightingProfile.commandCenter
+            ProfileLibrary.save(profiles: [initialProfile], selectedProfileID: initialProfile.id)
+            ProfileLibrary.setDefaultProfileID(initialProfile.id)
         }
 
         let now = Date.now
@@ -126,6 +139,7 @@ final class CommandCenterStore {
         ]
         recompile()
         startNativeRuntime()
+        startProfileAutomation()
     }
 
     var selectedProfile: LightingProfile {
@@ -137,6 +151,7 @@ final class CommandCenterStore {
     }
 
     func selectProfile(_ id: UUID) {
+        guard profiles.contains(where: { $0.id == id }) else { return }
         selectedProfileID = id
         allocator.reset()
         recompile()
@@ -159,17 +174,93 @@ final class CommandCenterStore {
     func duplicateSelectedProfile() {
         var copy = selectedProfile
         copy.id = UUID()
-        copy.name += " Copy"
+        copy.name = uniqueProfileName(base: "\(selectedProfile.name) Copy")
         profiles.append(copy)
         selectProfile(copy.id)
+        ProfileFocusIntegration.profileLibraryDidChange()
     }
 
     func createProfile() {
-        var profile = LightingProfile.commandCenter
+        var profile = selectedProfile
         profile.id = UUID()
-        profile.name = "New Profile"
+        profile.name = uniqueProfileName(base: "New Profile")
         profiles.append(profile)
         selectProfile(profile.id)
+        ProfileFocusIntegration.profileLibraryDidChange()
+    }
+
+    func renameSelectedProfile(_ name: String) {
+        guard let index = profiles.firstIndex(where: { $0.id == selectedProfileID }) else { return }
+        profiles[index].name = name
+        persistProfiles()
+        ProfileFocusIntegration.profileLibraryDidChange()
+    }
+
+    func deleteSelectedProfile() {
+        guard profiles.count > 1,
+              selectedProfileID != defaultProfileID,
+              let index = profiles.firstIndex(where: { $0.id == selectedProfileID })
+        else { return }
+        profiles.remove(at: index)
+        selectedProfileID = defaultProfileID ?? profiles[0].id
+        allocator.reset()
+        recompile()
+        persistProfiles()
+        ProfileFocusIntegration.profileLibraryDidChange()
+    }
+
+    func exportProfiles() {
+        let panel = NSSavePanel()
+        panel.title = "Export SidePulse Profiles"
+        panel.nameFieldStringValue = "SidePulse Profiles.json"
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let data = try ProfileLibrary.exportData(profiles: profiles)
+            try data.write(to: url, options: .atomic)
+            profileTransferFailed = false
+            profileTransferMessage = "Exported \(profiles.count) profile\(profiles.count == 1 ? "" : "s") to \(url.lastPathComponent)."
+        } catch {
+            profileTransferFailed = true
+            profileTransferMessage = "Export failed: \(error.localizedDescription)"
+        }
+    }
+
+    func importProfiles() {
+        let panel = NSOpenPanel()
+        panel.title = "Import SidePulse Profiles"
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let imported = try ProfileLibrary.importProfiles(from: Data(contentsOf: url))
+            for profile in imported {
+                if let existing = profiles.firstIndex(where: { $0.id == profile.id }) {
+                    profiles[existing] = profile
+                } else {
+                    profiles.append(profile)
+                }
+            }
+            selectedProfileID = imported[0].id
+            allocator.reset()
+            recompile()
+            persistProfiles()
+            ProfileFocusIntegration.profileLibraryDidChange()
+            profileTransferFailed = false
+            profileTransferMessage = "Imported \(imported.count) profile\(imported.count == 1 ? "" : "s") from \(url.lastPathComponent)."
+        } catch {
+            profileTransferFailed = true
+            profileTransferMessage = "Import failed: \(error.localizedDescription)"
+        }
+    }
+
+    func openFocusSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.Focus-Settings.extension") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func selectAgent(_ agent: AgentSession) {
@@ -232,6 +323,81 @@ final class CommandCenterStore {
             profiles: profiles,
             selectedProfileID: selectedProfileID
         )
+    }
+
+    var defaultProfileID: UUID? {
+        let stored = ProfileLibrary.defaultProfileID()
+        return stored.flatMap { id in profiles.contains(where: { $0.id == id }) ? id : nil }
+            ?? profiles.first?.id
+    }
+
+    private func uniqueProfileName(base: String) -> String {
+        guard profiles.contains(where: { $0.name.localizedCaseInsensitiveCompare(base) == .orderedSame }) else {
+            return base
+        }
+        var suffix = 2
+        while profiles.contains(where: {
+            $0.name.localizedCaseInsensitiveCompare("\(base) \(suffix)") == .orderedSame
+        }) {
+            suffix += 1
+        }
+        return "\(base) \(suffix)"
+    }
+
+    private func startProfileAutomation() {
+        profileSelectionObserver = DistributedNotificationCenter.default().addObserver(
+            forName: .sidePulseProfileSelectionDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.reloadProfileSelection()
+            }
+        }
+
+        focusMonitor = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.syncFocusProfile()
+            }
+        }
+        Task { @MainActor [weak self] in
+            await self?.syncFocusProfile()
+        }
+    }
+
+    private func reloadProfileSelection() {
+        focusAutomationEnabled = ProfileLibrary.focusAutomationEnabled()
+        guard let saved = ProfileLibrary.load(), !saved.profiles.isEmpty else { return }
+        profiles = saved.profiles
+        let targetID = saved.profiles.contains(where: { $0.id == saved.selectedProfileID })
+            ? saved.selectedProfileID
+            : saved.profiles[0].id
+        guard selectedProfileID != targetID else { return }
+        selectedProfileID = targetID
+        allocator.reset()
+        recompile()
+    }
+
+    private func syncFocusProfile() async {
+        focusAutomationEnabled = ProfileLibrary.focusAutomationEnabled()
+        guard focusAutomationEnabled else { return }
+        let currentID = await ProfileFocusIntegration.currentProfileID()
+        activeFocusProfileID = currentID
+
+        let contextChanged = !hasObservedFocusContext || currentID != lastObservedFocusProfileID
+        hasObservedFocusContext = true
+        lastObservedFocusProfileID = currentID
+        guard contextChanged else { return }
+
+        let targetID = currentID ?? defaultProfileID
+        guard let targetID,
+              profiles.contains(where: { $0.id == targetID }),
+              selectedProfileID != targetID
+        else { return }
+        selectedProfileID = targetID
+        allocator.reset()
+        recompile()
+        persistProfiles()
     }
 
     private func startNativeRuntime() {
