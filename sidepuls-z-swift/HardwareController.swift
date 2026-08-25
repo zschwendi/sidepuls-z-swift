@@ -88,6 +88,11 @@ final class SidePulseHardwareController: @unchecked Sendable {
                 return
             }
 
+            // System and manual previews own the LEDs for their full, short
+            // duration. Agent updates still replace requestedProgram above, so
+            // the newest underlying scene is restored when the preview ends.
+            if activePreviewGeneration != nil { return }
+
             if !wasEnabled {
                 cancelPreviewLocked()
                 cancelDeferredWriteLocked()

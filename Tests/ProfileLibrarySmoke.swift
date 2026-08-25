@@ -126,7 +126,19 @@ enum ProfileLibrarySmoke {
             // Expected.
         }
 
-        print("Profile library smoke passed: live settings are factory defaults, saved profiles win, and JSON round-trips")
+        let preferencesSuiteName = "sidepulse.preferences-smoke.\(UUID().uuidString)"
+        let preferencesDefaults = UserDefaults(suiteName: preferencesSuiteName)!
+        defer { preferencesDefaults.removePersistentDomain(forName: preferencesSuiteName) }
+        precondition(AppPreferences.batteryIndicatorSettings(from: preferencesDefaults) == BatteryIndicatorSettings())
+        var batterySettings = BatteryIndicatorSettings()
+        batterySettings.mode = .statusBottom
+        batterySettings.showsWhenLidCloses = false
+        batterySettings.lowBatteryThresholdPercent = 30
+        batterySettings.lowBatteryReminderIntervalSeconds = 45
+        AppPreferences.saveBatteryIndicatorSettings(batterySettings, to: preferencesDefaults)
+        precondition(AppPreferences.batteryIndicatorSettings(from: preferencesDefaults) == batterySettings)
+
+        print("Profile library smoke passed: profiles and battery indication preferences persist independently")
     }
 
     private static func require<T>(_ value: T?) throws -> T {

@@ -513,7 +513,6 @@ struct TimedLightingScene: Equatable, Sendable {
 enum SystemLightingScenes {
     private static let fillMilliseconds = 500
     private static let batteryHoldMilliseconds = 1_500
-    private static let lowBatteryHoldMilliseconds = 1_000
     private static let batteryGreen = "#66FF5F"
     private static let batteryOrange = "#FF9F0A"
     private static let batteryRed = "#FF3B30"
@@ -527,18 +526,43 @@ enum SystemLightingScenes {
         return max(1, min(count, rounded))
     }
 
-    static func batteryGauge(chargeFraction: Double, ledCount: Int) -> TimedLightingScene {
+    static func batteryGauge(
+        chargeFraction: Double,
+        ledCount: Int,
+        mode: BatteryIndicatorMode = .levelColorOutline,
+        lowBatteryThresholdPercent: Int = 25
+    ) -> TimedLightingScene {
         let count = max(1, min(8, ledCount))
+        if mode == .statusArray || mode == .statusBottom {
+            return statusScene(
+                chargeFraction: chargeFraction,
+                ledCount: count,
+                mode: mode,
+                lowBatteryThresholdPercent: lowBatteryThresholdPercent
+            )
+        }
+
         let illuminated = illuminatedLEDCount(chargeFraction: chargeFraction, ledCount: count)
-        let levelColor = batteryLevelColor(illuminated: illuminated, ledCount: count)
-        let sweep = fillSegments(indices: Array(0..<illuminated), color: levelColor)
+        let litColors = (0..<illuminated).map { index in
+            (
+                index: index,
+                color: barColor(
+                    at: index,
+                    illuminated: illuminated,
+                    ledCount: count,
+                    mode: mode
+                )
+            )
+        }
+        let remainder = remainderColor(for: mode)
+        let sweep = fillSegments(litColors)
         let hold = (0..<count).map { index in
-            let color = index < illuminated ? levelColor : batteryRemainder
+            let color = litColors.first(where: { $0.index == index })?.color ?? remainder
             return "\(index):\(color) \(batteryHoldMilliseconds)ms none"
         }
         let program = [
             "brightness 255",
-            batteryRemainder,
+            remainder == "#000000" ? "off" : remainder,
             sweep.joined(separator: ";"),
             hold.joined(separator: ";"),
         ].joined(separator: "\n")
@@ -549,6 +573,51 @@ enum SystemLightingScenes {
         )
     }
 
+    private static func statusScene(
+        chargeFraction: Double,
+        ledCount: Int,
+        mode: BatteryIndicatorMode,
+        lowBatteryThresholdPercent: Int
+    ) -> TimedLightingScene {
+        let threshold = Double(max(5, min(100, lowBatteryThresholdPercent))) / 100
+        let color = chargeFraction <= threshold ? batteryOrange : batteryGreen
+        let durationMilliseconds = fillMilliseconds + batteryHoldMilliseconds
+        let status = mode == .statusBottom
+            ? "0:\(color) \(durationMilliseconds / 1_000)s none"
+            : "\(color) \(durationMilliseconds / 1_000)s none"
+        let program = ["brightness 255", "off", status].joined(separator: "\n")
+        precondition(program.utf8.count <= 512, "Battery status exceeds the firmware limit")
+        return TimedLightingScene(
+            program: program,
+            duration: Double(durationMilliseconds) / 1_000
+        )
+    }
+
+    private static func barColor(
+        at index: Int,
+        illuminated: Int,
+        ledCount: Int,
+        mode: BatteryIndicatorMode
+    ) -> String {
+        switch mode {
+        case .levelColorOutline, .levelColor:
+            batteryLevelColor(illuminated: illuminated, ledCount: ledCount)
+        case .greenOutline, .green:
+            batteryGreen
+        case .splitGreenOrange:
+            index < max(1, ledCount / 2) ? batteryGreen : batteryOrange
+        case .statusArray, .statusBottom:
+            batteryGreen
+        }
+    }
+
+    private static func remainderColor(for mode: BatteryIndicatorMode) -> String {
+        switch mode {
+        case .levelColorOutline, .greenOutline: batteryRemainder
+        case .levelColor, .green, .splitGreenOrange, .statusArray, .statusBottom: "#000000"
+        }
+    }
+
     private static func batteryLevelColor(illuminated: Int, ledCount: Int) -> String {
         let count = max(1, ledCount)
         if illuminated * 8 >= count * 5 { return batteryGreen }
@@ -556,41 +625,19 @@ enum SystemLightingScenes {
         return batteryRed
     }
 
-    static func lowBatteryAlert(ledCount: Int) -> TimedLightingScene {
-        let count = max(1, min(8, ledCount))
-        let greenCount = min(2, count)
-        var animation = fillSegments(indices: Array(0..<greenCount), color: batteryGreen)
-        animation += (greenCount..<count).map {
-            "\($0):#260000 \(fillMilliseconds)ms cosine"
-        }
-        let hold = (0..<count).map { index in
-            let color = index < greenCount ? batteryGreen : "#260000"
-            return "\(index):\(color) \(lowBatteryHoldMilliseconds / 1_000)s none"
-        }
-        let program = [
-            "brightness 255",
-            "off",
-            animation.joined(separator: ";"),
-            hold.joined(separator: ";"),
-        ].joined(separator: "\n")
-        precondition(program.utf8.count <= 512, "Low-battery alert exceeds the firmware limit")
-        return TimedLightingScene(
-            program: program,
-            duration: Double(fillMilliseconds + lowBatteryHoldMilliseconds) / 1_000
-        )
-    }
-
-    private static func fillSegments(indices: [Int], color: String) -> [String] {
-        guard !indices.isEmpty else { return [] }
-        let transitionMilliseconds = indices.count == 1 ? fillMilliseconds : 120
-        let staggerMilliseconds = indices.count == 1
+    private static func fillSegments(
+        _ assignments: [(index: Int, color: String)]
+    ) -> [String] {
+        guard !assignments.isEmpty else { return [] }
+        let transitionMilliseconds = assignments.count == 1 ? fillMilliseconds : 120
+        let staggerMilliseconds = assignments.count == 1
             ? 0
-            : (fillMilliseconds - transitionMilliseconds) / (indices.count - 1)
-        return indices.enumerated().map { position, index in
+            : (fillMilliseconds - transitionMilliseconds) / (assignments.count - 1)
+        return assignments.enumerated().map { position, assignment in
             let delay = position * staggerMilliseconds
             return delay == 0
-                ? "\(index):\(color) \(transitionMilliseconds)ms cosine"
-                : "\(index):\(color) \(transitionMilliseconds)ms cosine \(delay)ms"
+                ? "\(assignment.index):\(assignment.color) \(transitionMilliseconds)ms cosine"
+                : "\(assignment.index):\(assignment.color) \(transitionMilliseconds)ms cosine \(delay)ms"
         }
     }
 }

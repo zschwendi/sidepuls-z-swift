@@ -61,6 +61,7 @@ final class CommandCenterStore {
     }
     var hardwareDevices: [DeviceState] { [proDevice, dotDevice] }
     var batteryState: BatteryState?
+    var batterySettings = AppPreferences.batteryIndicatorSettings()
     var lidIsClosed: Bool?
     var lastLidTransitionAt: Date?
     var scene = CompiledScene(program: "", slots: [])
@@ -344,6 +345,36 @@ final class CommandCenterStore {
         dotHardware?.preview(program: dotPreview.program)
     }
 
+    func updateBatterySettings(_ update: (inout BatteryIndicatorSettings) -> Void) {
+        var next = batterySettings
+        update(&next)
+        next = next.normalized
+        guard next != batterySettings else { return }
+        batterySettings = next
+        lastLowBatteryAlertAt = nil
+        AppPreferences.saveBatteryIndicatorSettings(next)
+    }
+
+    func selectBatteryIndicatorMode(_ mode: BatteryIndicatorMode) {
+        updateBatterySettings { $0.mode = mode }
+        if batterySettings.showsChargeInfo { previewBatteryIndicator() }
+    }
+
+    func previewBatteryIndicator() {
+        guard batterySettings.showsChargeInfo else { return }
+        let chargeFraction = batteryState?.chargeFraction ?? 1
+        let proTransition = batteryIndicatorScene(
+            chargeFraction: chargeFraction,
+            ledCount: SidePulseDeviceKind.pro.ledCount
+        )
+        let dotTransition = batteryIndicatorScene(
+            chargeFraction: chargeFraction,
+            ledCount: SidePulseDeviceKind.dot.ledCount
+        )
+        proHardware?.preview(program: proTransition.program, duration: proTransition.duration)
+        dotHardware?.preview(program: dotTransition.program, duration: dotTransition.duration)
+    }
+
     private func persistProfiles() {
         ProfileLibrary.save(
             profiles: profiles,
@@ -454,24 +485,14 @@ final class CommandCenterStore {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.lidIsClosed = isClosed
-                guard isTransition else { return }
+                guard isTransition,
+                      self.batterySettings.showsChargeInfo,
+                      (isClosed
+                        ? self.batterySettings.showsWhenLidCloses
+                        : self.batterySettings.showsWhenLidOpens)
+                else { return }
                 self.lastLidTransitionAt = .now
-                let proTransition = SystemLightingScenes.batteryGauge(
-                    chargeFraction: self.batteryState?.chargeFraction ?? 1,
-                    ledCount: SidePulseDeviceKind.pro.ledCount
-                )
-                let dotTransition = SystemLightingScenes.batteryGauge(
-                    chargeFraction: self.batteryState?.chargeFraction ?? 1,
-                    ledCount: SidePulseDeviceKind.dot.ledCount
-                )
-                self.proHardware?.preview(
-                    program: proTransition.program,
-                    duration: proTransition.duration
-                )
-                self.dotHardware?.preview(
-                    program: dotTransition.program,
-                    duration: dotTransition.duration
-                )
+                self.previewBatteryIndicator()
             }
         }
         self.lidMonitor = lidMonitor
@@ -507,18 +528,35 @@ final class CommandCenterStore {
 
     private func handleBatteryUpdate(_ state: BatteryState?) {
         if batteryState != state { batteryState = state }
-        guard let state, state.isLowAndDischarging else {
+        let threshold = Double(batterySettings.lowBatteryThresholdPercent) / 100
+        guard batterySettings.showsChargeInfo,
+              batterySettings.lowBatteryReminderEnabled,
+              let state,
+              state.chargeFraction <= threshold,
+              !state.isCharging,
+              !state.isExternallyPowered
+        else {
             lastLowBatteryAlertAt = nil
             return
         }
 
         let now = Date.now
-        guard lastLowBatteryAlertAt.map({ now.timeIntervalSince($0) >= 15 }) ?? true else { return }
+        let interval = TimeInterval(batterySettings.lowBatteryReminderIntervalSeconds)
+        guard lastLowBatteryAlertAt.map({ now.timeIntervalSince($0) >= interval }) ?? true else { return }
         lastLowBatteryAlertAt = now
-        let proAlert = SystemLightingScenes.lowBatteryAlert(ledCount: SidePulseDeviceKind.pro.ledCount)
-        let dotAlert = SystemLightingScenes.lowBatteryAlert(ledCount: SidePulseDeviceKind.dot.ledCount)
-        proHardware?.preview(program: proAlert.program, duration: proAlert.duration)
-        dotHardware?.preview(program: dotAlert.program, duration: dotAlert.duration)
+        previewBatteryIndicator()
+    }
+
+    private func batteryIndicatorScene(
+        chargeFraction: Double,
+        ledCount: Int
+    ) -> TimedLightingScene {
+        SystemLightingScenes.batteryGauge(
+            chargeFraction: chargeFraction,
+            ledCount: ledCount,
+            mode: batterySettings.mode,
+            lowBatteryThresholdPercent: batterySettings.lowBatteryThresholdPercent
+        )
     }
 
     private func syncHardwareOutput() {

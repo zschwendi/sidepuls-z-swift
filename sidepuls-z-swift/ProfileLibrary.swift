@@ -163,6 +163,7 @@ enum ProfileLibrary {
 
 enum AppPreferences {
     private static let liveOutputKey = "sidepulse.live-output-enabled.v1"
+    private static let batteryIndicatorKey = "sidepulse.battery-indicator.v1"
 
     static func liveOutputEnabled(from defaults: UserDefaults = .standard) -> Bool {
         guard defaults.object(forKey: liveOutputKey) != nil else {
@@ -175,5 +176,21 @@ enum AppPreferences {
 
     static func saveLiveOutputEnabled(_ enabled: Bool, to defaults: UserDefaults = .standard) {
         defaults.set(enabled, forKey: liveOutputKey)
+    }
+
+    static func batteryIndicatorSettings(
+        from defaults: UserDefaults = .standard
+    ) -> BatteryIndicatorSettings {
+        guard let data = defaults.data(forKey: batteryIndicatorKey),
+              let settings = try? JSONDecoder().decode(BatteryIndicatorSettings.self, from: data)
+        else { return BatteryIndicatorSettings() }
+        return settings.normalized
+    }
+
+    static func saveBatteryIndicatorSettings(
+        _ settings: BatteryIndicatorSettings,
+        to defaults: UserDefaults = .standard
+    ) {
+        defaults.set(try? JSONEncoder().encode(settings.normalized), forKey: batteryIndicatorKey)
     }
 }

@@ -1166,35 +1166,138 @@ struct HardwareDeviceCard: View {
 struct SystemView: View {
     @Bindable var store: CommandCenterStore
     var body: some View {
-        let lidState = store.lidIsClosed.map { $0 ? "Closed" : "Open" } ?? "Detecting"
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Agent Connections").font(.largeTitle.bold())
-                    Text("Codex is zero-config. Provider hooks add live events for Claude and Grok.")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Connections & Battery").font(.largeTitle.bold())
+                        Text("Agent signals and the system scenes that temporarily take over your SidePulse.")
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                BatterySettingsCard(store: store)
+                Divider()
+                ForEach(store.integrations) { integration in
+                    IntegrationStatusCard(integration: integration)
+                }
+                FeaturePlaceholder(
+                    title: "ChatGPT Chats",
+                    subtitle: "Waiting for a supported local thinking / finished signal",
+                    symbol: "bubble.left.and.bubble.right.fill",
+                    badge: "Planned"
+                )
+                Spacer()
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+}
+
+struct BatterySettingsCard: View {
+    @Bindable var store: CommandCenterStore
+
+    private var batteryStatus: String {
+        guard let state = store.batteryState else { return "Reading battery state…" }
+        let percent = Int((state.chargeFraction * 100).rounded())
+        let power = state.isCharging ? "Charging" : state.isExternallyPowered ? "AC Power" : "On Battery"
+        let lid = store.lidIsClosed.map { $0 ? "Lid closed" : "Lid open" } ?? "Detecting lid"
+        return "\(percent)% · \(power) · \(lid)"
+    }
+
+    private func settingBinding<Value>(
+        _ keyPath: WritableKeyPath<BatteryIndicatorSettings, Value>
+    ) -> Binding<Value> {
+        Binding(
+            get: { store.batterySettings[keyPath: keyPath] },
+            set: { value in
+                store.updateBatterySettings { $0[keyPath: keyPath] = value }
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 14) {
+                Image(systemName: "battery.75percent")
+                    .font(.title2)
+                    .foregroundStyle(.green)
+                    .frame(width: 44, height: 44)
+                    .background(.green.opacity(0.12), in: .rect(cornerRadius: 14))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Show Charge Info").font(.headline)
+                    Text(batteryStatus)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Toggle("Show Charge Info", isOn: settingBinding(\.showsChargeInfo))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
             }
-            ForEach(store.integrations) { integration in
-                IntegrationStatusCard(integration: integration)
+
+            VStack(alignment: .leading, spacing: 14) {
+                Divider()
+                HStack(alignment: .bottom, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Battery indication").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Picker("Battery indication", selection: Binding(
+                            get: { store.batterySettings.mode },
+                            set: { store.selectBatteryIndicatorMode($0) }
+                        )) {
+                            ForEach(BatteryIndicatorMode.allCases) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 260)
+                    }
+                    Button {
+                        store.previewBatteryIndicator()
+                    } label: {
+                        Label("Preview", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!store.proDevice.connected)
+                    Spacer()
+                }
+                Text(store.batterySettings.mode.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Divider()
+                HStack(spacing: 24) {
+                    Toggle("When lid is opened", isOn: settingBinding(\.showsWhenLidOpens))
+                    Toggle("When lid is closed", isOn: settingBinding(\.showsWhenLidCloses))
+                    Spacer()
+                }
+                .toggleStyle(.switch)
+
+                Divider()
+                HStack(spacing: 18) {
+                    Toggle("Low battery reminder", isOn: settingBinding(\.lowBatteryReminderEnabled))
+                        .toggleStyle(.switch)
+                    Stepper(
+                        "Below \(store.batterySettings.lowBatteryThresholdPercent)%",
+                        value: settingBinding(\.lowBatteryThresholdPercent),
+                        in: 5...100,
+                        step: 5
+                    )
+                    Stepper(
+                        "Every \(store.batterySettings.lowBatteryReminderIntervalSeconds)s",
+                        value: settingBinding(\.lowBatteryReminderIntervalSeconds),
+                        in: 5...3_600,
+                        step: 5
+                    )
+                    Spacer()
+                }
             }
-            Divider()
-            FeaturePlaceholder(
-                title: "ChatGPT Chats",
-                subtitle: "Waiting for a supported local thinking / finished signal",
-                symbol: "bubble.left.and.bubble.right.fill",
-                badge: "Planned"
-            )
-            FeaturePlaceholder(
-                title: "Lid Animation",
-                subtitle: "\(lidState) · white sweep on every open and close",
-                symbol: "laptopcomputer",
-                badge: store.lidIsClosed == nil ? "Detecting" : "Active"
-            )
-            FeaturePlaceholder(title: "Battery Overlay", subtitle: "Charging and power-change scenes", symbol: "battery.75percent")
-            Spacer()
+            .disabled(!store.batterySettings.showsChargeInfo)
+            .opacity(store.batterySettings.showsChargeInfo ? 1 : 0.45)
         }
+        .padding(20)
+        .glassEffect(.regular.tint(.green.opacity(0.035)), in: .rect(cornerRadius: 24))
     }
 }
 

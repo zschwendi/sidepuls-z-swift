@@ -431,6 +431,66 @@ struct DeviceState: Equatable, Sendable {
     var lastError: String?
 }
 
+enum BatteryIndicatorMode: String, CaseIterable, Codable, Identifiable, Sendable {
+    case levelColorOutline
+    case levelColor
+    case greenOutline
+    case green
+    case splitGreenOrange
+    case statusArray
+    case statusBottom
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .levelColorOutline: "Level Colors + Outline"
+        case .levelColor: "Level Colors"
+        case .greenOutline: "Green Bar + Outline"
+        case .green: "Green Bar"
+        case .splitGreenOrange: "Green → Orange Bar"
+        case .statusArray: "AirPods Status · Full Array"
+        case .statusBottom: "AirPods Status · Bottom LED"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .levelColorOutline:
+            "Current behavior: charge level in green, orange, or red with unfilled LEDs dim white."
+        case .levelColor:
+            "Charge level in green, orange, or red with every unfilled LED off."
+        case .greenOutline:
+            "An always-green charge bar with unfilled LEDs dim white."
+        case .green:
+            "An always-green charge bar with every unfilled LED off."
+        case .splitGreenOrange:
+            "The lower four charge steps are green and the upper four are orange."
+        case .statusArray:
+            "The whole array is solid green above the reminder threshold or orange below it."
+        case .statusBottom:
+            "Only LED 1 is solid green above the reminder threshold or orange below it."
+        }
+    }
+}
+
+struct BatteryIndicatorSettings: Codable, Equatable, Sendable {
+    var showsChargeInfo = true
+    var mode: BatteryIndicatorMode = .levelColorOutline
+    var showsWhenLidOpens = true
+    var showsWhenLidCloses = true
+    var lowBatteryReminderEnabled = true
+    var lowBatteryThresholdPercent = 25
+    var lowBatteryReminderIntervalSeconds = 15
+
+    var normalized: BatteryIndicatorSettings {
+        var result = self
+        result.lowBatteryThresholdPercent = max(5, min(100, lowBatteryThresholdPercent))
+        result.lowBatteryReminderIntervalSeconds = max(5, min(3_600, lowBatteryReminderIntervalSeconds))
+        return result
+    }
+}
+
 enum SidePulseDeviceKind: String, CaseIterable, Sendable {
     case pro
     case dot

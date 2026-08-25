@@ -75,15 +75,71 @@ enum SceneCompilerSmoke {
         let dotHalfBattery = SystemLightingScenes.batteryGauge(chargeFraction: 0.5, ledCount: 2)
         precondition(dotHalfBattery.program.contains("0:#FF9F0A 1500ms none"))
 
-        let lowBattery = SystemLightingScenes.lowBatteryAlert(ledCount: 8)
-        precondition(lowBattery.program.hasPrefix("brightness 255\noff\n"))
-        precondition(lowBattery.program.contains("0:#66FF5F 120ms cosine"))
-        precondition(lowBattery.program.contains("1:#66FF5F 120ms cosine 380ms"))
-        precondition(lowBattery.program.contains("2:#260000 500ms cosine"))
-        precondition(lowBattery.program.contains("1:#66FF5F 1s none"))
-        precondition(lowBattery.program.contains("7:#260000 1s none"))
-        precondition(lowBattery.duration == 1.5)
-        precondition(lowBattery.program.utf8.count <= 512)
+        let levelWithoutOutline = SystemLightingScenes.batteryGauge(
+            chargeFraction: 0.45,
+            ledCount: 8,
+            mode: .levelColor
+        )
+        precondition(levelWithoutOutline.program.hasPrefix("brightness 255\noff\n"))
+        precondition(levelWithoutOutline.program.contains("3:#FF9F0A 1500ms none"))
+        precondition(levelWithoutOutline.program.contains("4:#000000 1500ms none"))
+
+        let greenOutline = SystemLightingScenes.batteryGauge(
+            chargeFraction: 0.25,
+            ledCount: 8,
+            mode: .greenOutline
+        )
+        precondition(greenOutline.program.contains("1:#66FF5F 1500ms none"))
+        precondition(greenOutline.program.contains("2:#4D4D4D 1500ms none"))
+
+        let greenWithoutOutline = SystemLightingScenes.batteryGauge(
+            chargeFraction: 0.25,
+            ledCount: 8,
+            mode: .green
+        )
+        precondition(greenWithoutOutline.program.contains("1:#66FF5F 1500ms none"))
+        precondition(greenWithoutOutline.program.contains("2:#000000 1500ms none"))
+
+        let splitBar = SystemLightingScenes.batteryGauge(
+            chargeFraction: 1,
+            ledCount: 8,
+            mode: .splitGreenOrange
+        )
+        precondition(splitBar.program.contains("3:#66FF5F 1500ms none"))
+        precondition(splitBar.program.contains("4:#FF9F0A 1500ms none"))
+        precondition(splitBar.program.contains("7:#FF9F0A 1500ms none"))
+
+        let statusCharged = SystemLightingScenes.batteryGauge(
+            chargeFraction: 0.72,
+            ledCount: 8,
+            mode: .statusArray,
+            lowBatteryThresholdPercent: 25
+        )
+        precondition(statusCharged.program == "brightness 255\noff\n#66FF5F 2s none")
+        let statusLow = SystemLightingScenes.batteryGauge(
+            chargeFraction: 0.25,
+            ledCount: 8,
+            mode: .statusArray,
+            lowBatteryThresholdPercent: 25
+        )
+        precondition(statusLow.program == "brightness 255\noff\n#FF9F0A 2s none")
+        let statusBottom = SystemLightingScenes.batteryGauge(
+            chargeFraction: 0.25,
+            ledCount: 8,
+            mode: .statusBottom,
+            lowBatteryThresholdPercent: 25
+        )
+        precondition(statusBottom.program == "brightness 255\noff\n0:#FF9F0A 2s none")
+
+        for mode in BatteryIndicatorMode.allCases {
+            let scene = SystemLightingScenes.batteryGauge(
+                chargeFraction: 0.25,
+                ledCount: 8,
+                mode: mode
+            )
+            precondition(scene.duration == 2)
+            precondition(scene.program.utf8.count <= 512, "\(mode.title) exceeds the firmware limit")
+        }
 
         let brightnessPreview = LEDFirmwareProgram(
             program: "brightness 128\n0:#FF0000;1:#00FF00",
@@ -335,7 +391,7 @@ enum SceneCompilerSmoke {
         if ProcessInfo.processInfo.environment["SIDEPULSE_DUMP_PROGRAMS"] == "1" {
             dumpFirmwarePrograms(now: now, compiler: compiler)
         }
-        print("Scene compiler smoke passed: dual-device discovery, mirrored Dot timing, battery scenes, motion geometry, color modes, adaptive stable layouts")
+        print("Scene compiler smoke passed: configurable battery modes, device discovery, motion geometry, color modes, adaptive stable layouts")
     }
 
     private static func dumpFirmwarePrograms(now: Date, compiler: LightingSceneCompiler) {
@@ -357,11 +413,15 @@ enum SceneCompilerSmoke {
             }
         }
         for chargeFraction in [0.12, 0.45, 0.94] {
-            let scene = SystemLightingScenes.batteryGauge(chargeFraction: chargeFraction, ledCount: 8)
-            print("battery-\(chargeFraction)\t\(Data(scene.program.utf8).base64EncodedString())")
+            for mode in BatteryIndicatorMode.allCases {
+                let scene = SystemLightingScenes.batteryGauge(
+                    chargeFraction: chargeFraction,
+                    ledCount: 8,
+                    mode: mode
+                )
+                print("battery-\(mode.rawValue)-\(chargeFraction)\t\(Data(scene.program.utf8).base64EncodedString())")
+            }
         }
-        let alert = SystemLightingScenes.lowBatteryAlert(ledCount: 8)
-        print("battery-low\t\(Data(alert.program.utf8).base64EncodedString())")
     }
 
     private static func assertMotionPrograms(now: Date, compiler: LightingSceneCompiler) {
