@@ -527,8 +527,22 @@ final class CommandCenterStore {
         })
         let timing = hardwareTiming(from: lastOutputStates, to: currentStates)
         proHardware?.update(enabled: liveOutputEnabled, program: proScene.program, timing: timing)
-        dotHardware?.update(enabled: liveOutputEnabled, program: dotScene.program, timing: timing)
+        dotHardware?.update(
+            enabled: liveOutputEnabled,
+            program: dotScene.program,
+            timing: dotHardwareTiming(from: timing)
+        )
         lastOutputStates = currentStates
+    }
+
+    private func dotHardwareTiming(from timing: HardwareUpdateTiming) -> HardwareUpdateTiming {
+        guard case .animationBoundary = timing,
+              dotScene.placementsTopToBottom.count == 1,
+              let placement = dotScene.placementsTopToBottom.first,
+              placement.ledIndices.count == SidePulseDeviceKind.dot.ledCount,
+              selectedProfile.style(for: placement.agent.state).motion == .breathe
+        else { return timing }
+        return .animationBoundary(cycleSeconds: LightingSceneCompiler.dotDirectionalBreatheCycleSeconds)
     }
 
     private func resetAllocators() {

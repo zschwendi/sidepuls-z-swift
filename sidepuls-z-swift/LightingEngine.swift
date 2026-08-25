@@ -1,6 +1,17 @@
 import Foundation
 
 enum LEDProgramOutputCalibration {
+    static func applying(
+        to program: String,
+        brightnessScale: Double,
+        blueScale: Double
+    ) -> String {
+        scalingBlue(
+            in: scalingBrightness(in: program, by: brightnessScale),
+            by: blueScale
+        )
+    }
+
     static func scalingBrightness(in program: String, by scale: Double) -> String {
         let clampedScale = max(0, min(1, scale))
         guard clampedScale < 1, program != "off" else { return program }
@@ -15,6 +26,38 @@ enum LEDProgramOutputCalibration {
             lines.insert("brightness \(calibrated)", at: 0)
         }
         return lines.joined(separator: "\n")
+    }
+
+    static func scalingBlue(in program: String, by scale: Double) -> String {
+        let clampedScale = max(0, min(1, scale))
+        guard clampedScale < 1 else { return program }
+
+        var result = ""
+        var cursor = program.startIndex
+        while let hash = program[cursor...].firstIndex(of: "#") {
+            result += program[cursor..<hash]
+            guard let end = program.index(hash, offsetBy: 7, limitedBy: program.endIndex) else {
+                result += program[hash...]
+                return result
+            }
+            let token = program[program.index(after: hash)..<end]
+            guard token.count == 6,
+                  token.allSatisfy({ $0.isHexDigit }),
+                  let raw = Int(token, radix: 16)
+            else {
+                result.append("#")
+                cursor = program.index(after: hash)
+                continue
+            }
+
+            let red = (raw >> 16) & 0xFF
+            let green = (raw >> 8) & 0xFF
+            let blue = Int((Double(raw & 0xFF) * clampedScale).rounded())
+            result += String(format: "#%02X%02X%02X", red, green, max(0, min(255, blue)))
+            cursor = end
+        }
+        result += program[cursor...]
+        return result
     }
 }
 
@@ -160,6 +203,8 @@ struct StableSlotAllocator: Sendable {
 }
 
 struct LightingSceneCompiler: Sendable {
+    static let dotDirectionalBreatheCycleSeconds: TimeInterval = 1
+
     private struct RenderedSlot {
         var index: Int
         var style: StateLightStyle
@@ -253,19 +298,53 @@ struct LightingSceneCompiler: Sendable {
         let phaseTwo = needsSecondPhase ? rendered.compactMap {
             animatedSegment(for: $0, phase: 2, reverse: true, splitCycle: true)
         } : []
-        let animated = !phaseOne.isEmpty || !phaseTwo.isEmpty
+        let dotDirectionalBreathe = dotDirectionalBreatheLines(
+            for: rendered,
+            agentCount: indicesByAgent.count,
+            ledCount: ledCount
+        )
+        let animated = dotDirectionalBreathe != nil || !phaseOne.isEmpty || !phaseTwo.isEmpty
         var lines: [String] = []
         let brightness = Int(max(0, min(1, profile.deviceBrightness)) * 255)
         if brightness < 255 { lines.append("brightness \(brightness)") }
         lines.append(baseLine)
         if animated {
-            if !phaseOne.isEmpty { lines.append(phaseOne.joined(separator: ";")) }
-            if !phaseTwo.isEmpty { lines.append(phaseTwo.joined(separator: ";")) }
+            if let dotDirectionalBreathe {
+                lines.append(contentsOf: dotDirectionalBreathe)
+            } else {
+                if !phaseOne.isEmpty { lines.append(phaseOne.joined(separator: ";")) }
+                if !phaseTwo.isEmpty { lines.append(phaseTwo.joined(separator: ";")) }
+            }
             lines.append("repeat")
         }
         let program = lines.joined(separator: "\n")
         precondition(program.utf8.count <= 512, "Compiled LED program exceeds the firmware limit")
         return CompiledScene(program: program, slots: slots)
+    }
+
+    private func dotDirectionalBreatheLines(
+        for rendered: [RenderedSlot],
+        agentCount: Int,
+        ledCount: Int
+    ) -> [String]? {
+        guard ledCount == 2,
+              agentCount == 1,
+              rendered.count == 2,
+              rendered.allSatisfy({
+                  $0.style.motion == .breathe && $0.style.colorMode != .rotatingColorway
+              })
+        else { return nil }
+
+        let ordered = rendered.sorted { $0.index < $1.index }
+        let lower = ordered[0]
+        let upper = ordered[1]
+        let step = Self.dotDirectionalBreatheCycleSeconds / 4
+        return [
+            "\(lower.index):\(color(for: lower, phase: 0)) \(time(step)) cosine",
+            "\(upper.index):\(color(for: upper, phase: 0)) \(time(step)) cosine",
+            "\(lower.index):#000000 \(time(step)) cosine",
+            "\(upper.index):#000000 \(time(step)) cosine",
+        ]
     }
 
     private func animatedSegment(

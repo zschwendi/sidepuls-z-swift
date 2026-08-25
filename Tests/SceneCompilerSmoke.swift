@@ -246,6 +246,8 @@ enum SceneCompilerSmoke {
         precondition(SidePulseDeviceKind.detected(fromVolumeName: "Macintosh HD") == nil)
         precondition(SidePulseDeviceKind.pro.outputBrightnessScale == 1)
         precondition(SidePulseDeviceKind.dot.outputBrightnessScale == 0.4)
+        precondition(SidePulseDeviceKind.pro.outputBlueScale == 1)
+        precondition(SidePulseDeviceKind.dot.outputBlueScale == 0.75)
         precondition(
             LEDProgramOutputCalibration.scalingBrightness(
                 in: "brightness 183\n0:#00B300;1:#000000",
@@ -259,6 +261,13 @@ enum SceneCompilerSmoke {
             ) == "brightness 102\n0:#FFFFFF;1:#FFFFFF"
         )
         precondition(LEDProgramOutputCalibration.scalingBrightness(in: "off", by: 0.4) == "off")
+        precondition(
+            LEDProgramOutputCalibration.applying(
+                to: "brightness 183\n0:#6A1259;1:#000A6A",
+                brightnessScale: 0.4,
+                blueScale: 0.75
+            ) == "brightness 73\n0:#6A1243;1:#000A50"
+        )
         precondition(
             LEDProgramOutputCalibration.scalingBrightness(in: batteryGauge.program, by: 0.4)
                 .hasPrefix("brightness 102\n")
@@ -283,8 +292,21 @@ enum SceneCompilerSmoke {
         )
         precondition(mirroredPro.program.contains("0:#6A1259 600ms pulse"))
         precondition(mirroredPro.program.contains("7:#6A1259 600ms pulse 430ms"))
-        precondition(mirroredDot.program.contains("0:#6A1259 600ms pulse"), "Bottom Dot must start with Pro LED 1")
-        precondition(mirroredDot.program.contains("1:#6A1259 600ms pulse 430ms"), "Top Dot must finish with Pro LED 8")
+        precondition(mirroredDot.program.contains("0:#6A1259 250ms cosine"), "Bottom Dot must fade in first")
+        precondition(mirroredDot.program.contains("1:#6A1259 250ms cosine"), "Top Dot must fade in second")
+        precondition(mirroredDot.program.contains("0:#000000 250ms cosine"), "Bottom Dot must fade out third")
+        precondition(mirroredDot.program.contains("1:#000000 250ms cosine"), "Top Dot must fade out fourth")
+        precondition(!mirroredDot.program.contains("pulse"), "Dot breathe must not look like alternating police lights")
+
+        let dotBreatheRenderer = LEDFirmwareProgram(program: mirroredDot.program, ledCount: 2)
+        let lowerFadeIn = dotBreatheRenderer.frame(at: (1.0 / 60) + 0.125)
+        precondition(lowerFadeIn.colors[0].peak > 0 && approximately(lowerFadeIn.colors[1].peak, 0))
+        let upperFadeIn = dotBreatheRenderer.frame(at: (1.0 / 60) + 0.375)
+        precondition(upperFadeIn.colors[0].peak > upperFadeIn.colors[1].peak)
+        let lowerFadeOut = dotBreatheRenderer.frame(at: (1.0 / 60) + 0.625)
+        precondition(lowerFadeOut.colors[1].peak > lowerFadeOut.colors[0].peak)
+        let upperFadeOut = dotBreatheRenderer.frame(at: (1.0 / 60) + 0.875)
+        precondition(approximately(upperFadeOut.colors[0].peak, 0) && upperFadeOut.colors[1].peak > 0)
 
         proMirrorAllocator.reset()
         dotMirrorAllocator.reset()

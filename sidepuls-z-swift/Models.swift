@@ -456,6 +456,13 @@ enum SidePulseDeviceKind: String, CaseIterable, Sendable {
         }
     }
 
+    var outputBlueScale: Double {
+        switch self {
+        case .pro: 1
+        case .dot: 0.75
+        }
+    }
+
     var fallbackPath: String {
         switch self {
         case .pro: "/Volumes/SidePulse/LEDS.LED"
