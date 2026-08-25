@@ -197,7 +197,7 @@ enum AppPreferences {
     static func menuBarIconStyle(from defaults: UserDefaults = .standard) -> MenuBarIconStyle {
         guard let rawValue = defaults.string(forKey: menuBarIconStyleKey),
               let style = MenuBarIconStyle(rawValue: rawValue)
-        else { return .horizontalEight }
+        else { return .stateSymbol }
         return style
     }
 

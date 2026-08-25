@@ -23,69 +23,99 @@ struct SidePulseCommandCenterApp: App {
 struct SidePulseMenuBarIcon: View {
     @Bindable var store: CommandCenterStore
 
-    @ViewBuilder
     var body: some View {
-        switch store.menuBarIconStyle {
-        case .horizontalEight:
-            HStack(spacing: 0.9) {
-                ForEach(Array(groups(for: .horizontalEight).enumerated()), id: \.offset) { _, group in
-                    dot(for: group, diameter: 2.35)
-                }
+        Image(nsImage: MenuBarIconRenderer.image(
+            style: store.menuBarIconStyle,
+            stateSymbol: store.aggregateState.symbol,
+            slots: store.scene.slots,
+            ledCount: store.device.ledCount
+        ))
+        .renderingMode(.template)
+        .frame(width: MenuBarIconRenderer.size.width, height: MenuBarIconRenderer.size.height)
+        .accessibilityLabel("SidePulse, \(store.aggregateState.title), \(store.menuBarIconStyle.title)")
+        .help("SidePulse · \(store.aggregateState.title)")
+    }
+}
+
+enum MenuBarIconRenderer {
+    static let size = NSSize(width: 28, height: 16)
+
+    static func image(
+        style: MenuBarIconStyle,
+        stateSymbol: String,
+        slots: [AgentLEDSlot],
+        ledCount: Int
+    ) -> NSImage {
+        let image = NSImage(size: size, flipped: false) { bounds in
+            NSGraphicsContext.current?.shouldAntialias = true
+            if style == .stateSymbol {
+                drawStateSymbol(stateSymbol, in: bounds)
+            } else {
+                drawDots(style: style, slots: slots, ledCount: ledCount, in: bounds)
             }
-            .frame(minWidth: 26, minHeight: 14)
-            .accessibilityLabel("SidePulse, \(store.aggregateState.title), eight horizontal dots")
-        case .verticalEight:
-            VStack(spacing: 0.32) {
-                ForEach(Array(groups(for: .verticalEight).enumerated()), id: \.offset) { _, group in
-                    dot(for: group, diameter: 1.45)
-                }
-            }
-            .frame(minWidth: 14, minHeight: 16)
-            .accessibilityLabel("SidePulse, \(store.aggregateState.title), eight vertical dots")
-        case .mirroredFour:
-            HStack(spacing: 1.25) {
-                ForEach(Array(groups(for: .mirroredFour).enumerated()), id: \.offset) { _, group in
-                    dot(for: group, diameter: 3.35)
-                }
-            }
-            .frame(minWidth: 19, minHeight: 14)
-            .accessibilityLabel("SidePulse, \(store.aggregateState.title), four mirrored dots")
-        case .stateSymbol:
-            Image(systemName: store.aggregateState.symbol)
-                .accessibilityLabel("SidePulse, \(store.aggregateState.title)")
+            return true
         }
+        image.isTemplate = true
+        return image
     }
 
-    private func groups(for style: MenuBarIconStyle) -> [[Int]] {
-        MenuBarDotLayout.sourceIndices(for: style, ledCount: store.device.ledCount)
+    private static func drawStateSymbol(_ name: String, in bounds: NSRect) {
+        guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: "SidePulse")?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
+        else { return }
+        symbol.draw(in: NSRect(
+            x: bounds.midX - 7,
+            y: bounds.midY - 7,
+            width: 14,
+            height: 14
+        ))
     }
 
-    private func dot(for indices: [Int], diameter: CGFloat) -> some View {
-        let slot = representativeSlot(for: indices)
-        let color = slot.flatMap(\.agent).map {
-            Color(hex: store.selectedProfile.style(for: $0.state).colorHex)
-        } ?? Color.primary.opacity(0.18)
-        return Circle()
-            .fill(color)
-            .overlay {
-                Circle().stroke(.primary.opacity(slot?.agent == nil ? 0.22 : 0.12), lineWidth: 0.35)
-            }
-            .frame(width: diameter, height: diameter)
-            .accessibilityHidden(true)
-    }
+    private static func drawDots(
+        style: MenuBarIconStyle,
+        slots: [AgentLEDSlot],
+        ledCount: Int,
+        in bounds: NSRect
+    ) {
+        let groups = MenuBarDotLayout.sourceIndices(for: style, ledCount: ledCount)
+        guard !groups.isEmpty else { return }
 
-    private func representativeSlot(for indices: [Int]) -> AgentLEDSlot? {
-        let candidates = indices.compactMap { index in
-            store.scene.slots.first(where: { $0.index == index })
+        let geometry: (diameter: CGFloat, spacing: CGFloat, vertical: Bool) = switch style {
+        case .horizontalEight: (2.6, 0.65, false)
+        case .verticalEight: (1.65, 0.3, true)
+        case .mirroredFour: (4, 1.5, false)
+        case .stateSymbol: (0, 0, false)
         }
-        let populated = candidates.filter { $0.agent != nil }
-        return populated.min { left, right in
-            guard let leftAgent = left.agent, let rightAgent = right.agent else { return false }
-            if leftAgent.state.priority != rightAgent.state.priority {
-                return leftAgent.state.priority < rightAgent.state.priority
+        let totalLength = CGFloat(groups.count) * geometry.diameter
+            + CGFloat(max(0, groups.count - 1)) * geometry.spacing
+
+        for (position, indices) in groups.enumerated() {
+            let active = indices.contains { index in
+                slots.first(where: { $0.index == index })?.agent != nil
             }
-            return leftAgent.updatedAt > rightAgent.updatedAt
-        } ?? candidates.first
+            NSColor.black.withAlphaComponent(active ? 1 : 0.55).setFill()
+
+            let rect: NSRect
+            if geometry.vertical {
+                rect = NSRect(
+                    x: bounds.midX - geometry.diameter / 2,
+                    y: bounds.maxY - (bounds.height - totalLength) / 2
+                        - geometry.diameter
+                        - CGFloat(position) * (geometry.diameter + geometry.spacing),
+                    width: geometry.diameter,
+                    height: geometry.diameter
+                )
+            } else {
+                rect = NSRect(
+                    x: bounds.minX + (bounds.width - totalLength) / 2
+                        + CGFloat(position) * (geometry.diameter + geometry.spacing),
+                    y: bounds.midY - geometry.diameter / 2,
+                    width: geometry.diameter,
+                    height: geometry.diameter
+                )
+            }
+            NSBezierPath(ovalIn: rect).fill()
+        }
     }
 }
 

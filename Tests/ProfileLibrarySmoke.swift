@@ -132,7 +132,7 @@ enum ProfileLibrarySmoke {
         precondition(AppPreferences.agentDisplayMode(from: preferencesDefaults) == .simple)
         AppPreferences.saveAgentDisplayMode(.perAgent, to: preferencesDefaults)
         precondition(AppPreferences.agentDisplayMode(from: preferencesDefaults) == .perAgent)
-        precondition(AppPreferences.menuBarIconStyle(from: preferencesDefaults) == .horizontalEight)
+        precondition(AppPreferences.menuBarIconStyle(from: preferencesDefaults) == .stateSymbol)
         AppPreferences.saveMenuBarIconStyle(.mirroredFour, to: preferencesDefaults)
         precondition(AppPreferences.menuBarIconStyle(from: preferencesDefaults) == .mirroredFour)
         precondition(AppPreferences.batteryIndicatorSettings(from: preferencesDefaults) == BatteryIndicatorSettings())
