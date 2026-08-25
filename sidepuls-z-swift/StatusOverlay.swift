@@ -46,14 +46,20 @@ private final class SidePulseAgentSpaceModel {
     var isExpanded = false
     var isPinned = false
     var notchHeight: CGFloat = 30
+    var notchWidth: CGFloat = 166
 
     @ObservationIgnored var onLayoutChange: (() -> Void)?
     @ObservationIgnored private var isHovered = false
     @ObservationIgnored private var collapseWorkItem: DispatchWorkItem?
 
-    func update(_ signal: SidePulseStatusOverlaySignal, notchHeight: CGFloat) {
+    func update(
+        _ signal: SidePulseStatusOverlaySignal,
+        notchHeight: CGFloat,
+        notchWidth: CGFloat
+    ) {
         self.signal = signal
         self.notchHeight = notchHeight
+        self.notchWidth = notchWidth
         onLayoutChange?()
     }
 
@@ -96,8 +102,7 @@ private final class SidePulseAgentSpaceModel {
 
 @MainActor
 private final class SidePulseStatusOverlayController {
-    private let compactBaseWidth: CGFloat = 224
-    private let compactDropHeight: CGFloat = 15
+    private let compactSideWidth: CGFloat = 72
     private let expandedWidth: CGFloat = 390
     private let model = SidePulseAgentSpaceModel()
     private var panel: NSPanel?
@@ -141,8 +146,12 @@ private final class SidePulseStatusOverlayController {
 
         let panel = panel ?? makePanel()
         self.panel = panel
-        let notchHeight = targetScreen()?.safeAreaInsets.top ?? 30
-        model.update(signal, notchHeight: notchHeight)
+        let screen = targetScreen()
+        model.update(
+            signal,
+            notchHeight: screen?.safeAreaInsets.top ?? 30,
+            notchWidth: notchWidth(on: screen)
+        )
         updatePanelLayout(animated: panel.isVisible)
 
         guard !panel.isVisible else { return }
@@ -178,7 +187,7 @@ private final class SidePulseStatusOverlayController {
         panel.backgroundColor = .clear
         panel.title = "SidePulse Agent Space"
         panel.setAccessibilityLabel("SidePulse dynamic agent island")
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.level = .statusBar
         panel.hidesOnDeactivate = false
         panel.ignoresMouseEvents = false
@@ -204,6 +213,7 @@ private final class SidePulseStatusOverlayController {
             width: size.width,
             height: size.height
         )
+        panel.hasShadow = model.isExpanded
         guard animated, panel.isVisible else {
             panel.setFrame(frame, display: true)
             return
@@ -231,8 +241,8 @@ private final class SidePulseStatusOverlayController {
     private func compactSize(on screen: NSScreen?) -> NSSize {
         let notchHeight = screen?.safeAreaInsets.top ?? 30
         return NSSize(
-            width: max(compactBaseWidth, notchWidth(on: screen) + 58),
-            height: notchHeight + compactDropHeight
+            width: notchWidth(on: screen) + compactSideWidth * 2,
+            height: notchHeight
         )
     }
 
@@ -250,7 +260,7 @@ private struct SidePulseAgentSpaceView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.opacity(0.985)
+            Color.black.opacity(model.isExpanded ? 0.985 : 0)
 
             if model.isExpanded {
                 expandedContent
@@ -262,12 +272,19 @@ private struct SidePulseAgentSpaceView: View {
         }
         .clipShape(.rect(bottomLeadingRadius: 24, bottomTrailingRadius: 24))
         .overlay(alignment: .bottom) {
-            RoundedRectangle(cornerRadius: 1)
-                .fill(aggregateColor.opacity(model.isExpanded ? 0.34 : 0.7))
-                .frame(height: 1)
-                .padding(.horizontal, model.isExpanded ? 22 : 38)
+            if model.isExpanded {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(aggregateColor.opacity(0.34))
+                    .frame(height: 1)
+                    .padding(.horizontal, 22)
+            }
         }
-        .shadow(color: aggregateColor.opacity(0.18), radius: 18, y: 6)
+        .shadow(
+            color: aggregateColor.opacity(model.isExpanded ? 0.18 : 0),
+            radius: model.isExpanded ? 18 : 0,
+            y: model.isExpanded ? 6 : 0
+        )
+        .contentShape(.rect)
         .animation(.snappy(duration: 0.24), value: model.isExpanded)
         .animation(.easeInOut(duration: 0.18), value: model.signal)
         .onHover { model.setHovered($0) }
@@ -276,10 +293,15 @@ private struct SidePulseAgentSpaceView: View {
     }
 
     private var compactContent: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: model.notchHeight - 2)
-            HStack(spacing: 9) {
-                AgentSpaceDots(agents: model.signal.agents)
+        HStack(spacing: 0) {
+            AgentSpaceDots(agents: model.signal.agents)
+                .frame(width: 64, alignment: .trailing)
+                .padding(.trailing, 8)
+
+            Color.clear
+                .frame(width: model.notchWidth)
+
+            HStack(spacing: 6) {
                 Text("\(model.signal.agents.count)")
                     .font(.system(size: 9, weight: .bold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.8))
@@ -287,8 +309,10 @@ private struct SidePulseAgentSpaceView: View {
                     .font(.system(size: 6, weight: .bold))
                     .foregroundStyle(.white.opacity(0.46))
             }
-            .frame(height: 15)
+            .frame(width: 64, alignment: .leading)
+            .padding(.leading, 8)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var expandedContent: some View {
