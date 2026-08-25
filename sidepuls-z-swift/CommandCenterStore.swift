@@ -64,6 +64,7 @@ final class CommandCenterStore {
     var batterySettings = AppPreferences.batteryIndicatorSettings()
     var agentDisplayMode = AppPreferences.agentDisplayMode()
     var menuBarIconStyle = AppPreferences.menuBarIconStyle()
+    var statusOverlayEnabled = AppPreferences.statusOverlayEnabled()
     var lidIsClosed: Bool?
     var lastLidTransitionAt: Date?
     var scene = CompiledScene(program: "", slots: [])
@@ -92,6 +93,7 @@ final class CommandCenterStore {
     @ObservationIgnored private var lastLowBatteryAlertAt: Date?
     @ObservationIgnored private var isShowingPreviewData = true
     @ObservationIgnored private var lastOutputStates: [String: AgentState] = [:]
+    @ObservationIgnored private var lastPublishedOverlayState: AgentState?
     @ObservationIgnored private var profileSelectionObserver: NSObjectProtocol?
     @ObservationIgnored private var focusMonitor: Timer?
     @ObservationIgnored private var hasObservedFocusContext = false
@@ -191,6 +193,17 @@ final class CommandCenterStore {
         guard menuBarIconStyle != style else { return }
         menuBarIconStyle = style
         AppPreferences.saveMenuBarIconStyle(style)
+    }
+
+    func setStatusOverlayEnabled(_ enabled: Bool) {
+        guard statusOverlayEnabled != enabled else { return }
+        statusOverlayEnabled = enabled
+        AppPreferences.saveStatusOverlayEnabled(enabled)
+        if enabled {
+            publishStatusOverlayIfNeeded(force: true)
+        } else {
+            NotificationCenter.default.post(name: .sidePulseStatusOverlayDismiss, object: nil)
+        }
     }
 
     func updateSelectedProfile(_ update: (inout LightingProfile) -> Void) {
@@ -533,6 +546,7 @@ final class CommandCenterStore {
                 self.integrations = integrations
                 self.runtimeMessage = message
                 self.recompile()
+                self.publishStatusOverlayIfNeeded()
             }
         }
         self.runtime = runtime
@@ -610,6 +624,22 @@ final class CommandCenterStore {
     private func resetAllocators() {
         proAllocator.reset()
         dotAllocator.reset()
+    }
+
+    private func publishStatusOverlayIfNeeded(force: Bool = false) {
+        guard statusOverlayEnabled else { return }
+        let state = aggregateState
+        guard force || state != lastPublishedOverlayState else { return }
+        lastPublishedOverlayState = state
+        let signal = SidePulseStatusOverlaySignal(
+            state: state,
+            colorHex: selectedProfile.style(for: state).colorHex,
+            sessionCount: agents.count
+        )
+        NotificationCenter.default.post(
+            name: .sidePulseStatusOverlaySignalDidChange,
+            object: signal
+        )
     }
 
     private func hardwareTiming(

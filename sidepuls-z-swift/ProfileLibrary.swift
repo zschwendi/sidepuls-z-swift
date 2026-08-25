@@ -166,6 +166,7 @@ enum AppPreferences {
     private static let batteryIndicatorKey = "sidepulse.battery-indicator.v1"
     private static let agentDisplayModeKey = "sidepulse.agent-display-mode.v1"
     private static let menuBarIconStyleKey = "sidepulse.menu-bar-icon-style.v1"
+    private static let statusOverlayEnabledKey = "sidepulse.status-overlay-enabled.v1"
 
     static func liveOutputEnabled(from defaults: UserDefaults = .standard) -> Bool {
         guard defaults.object(forKey: liveOutputKey) != nil else {
@@ -206,6 +207,18 @@ enum AppPreferences {
         to defaults: UserDefaults = .standard
     ) {
         defaults.set(style.rawValue, forKey: menuBarIconStyleKey)
+    }
+
+    static func statusOverlayEnabled(from defaults: UserDefaults = .standard) -> Bool {
+        guard defaults.object(forKey: statusOverlayEnabledKey) != nil else { return true }
+        return defaults.bool(forKey: statusOverlayEnabledKey)
+    }
+
+    static func saveStatusOverlayEnabled(
+        _ enabled: Bool,
+        to defaults: UserDefaults = .standard
+    ) {
+        defaults.set(enabled, forKey: statusOverlayEnabledKey)
     }
 
     static func batteryIndicatorSettings(

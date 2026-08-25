@@ -16,6 +16,13 @@ enum ProfileLibrarySmoke {
             .init(state: .completed, colorHex: "#00D300", secondaryColorHex: "#7C3AED", motion: .solid, cycleSeconds: 1, intensity: 0.85),
         ])
 
+        let overlaySuiteName = "sidepulse.status-overlay-smoke.\(UUID().uuidString)"
+        let overlayDefaults = UserDefaults(suiteName: overlaySuiteName)!
+        defer { overlayDefaults.removePersistentDomain(forName: overlaySuiteName) }
+        precondition(AppPreferences.statusOverlayEnabled(from: overlayDefaults))
+        AppPreferences.saveStatusOverlayEnabled(false, to: overlayDefaults)
+        precondition(!AppPreferences.statusOverlayEnabled(from: overlayDefaults))
+
         let protectedSuiteName = "sidepulse.profile-protected-smoke.\(UUID().uuidString)"
         let protectedDefaults = UserDefaults(suiteName: protectedSuiteName)!
         defer { protectedDefaults.removePersistentDomain(forName: protectedSuiteName) }

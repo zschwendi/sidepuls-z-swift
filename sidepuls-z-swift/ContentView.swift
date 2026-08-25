@@ -311,6 +311,14 @@ struct SignalModeControl: View {
                     .labelsHidden()
                     .pickerStyle(.menu)
                 }
+
+                Toggle("Notch status popout", isOn: Binding(
+                    get: { store.statusOverlayEnabled },
+                    set: { store.setStatusOverlayEnabled($0) }
+                ))
+                .font(.caption)
+                .toggleStyle(.switch)
+                .controlSize(.small)
             }
             .frame(width: 240)
         }

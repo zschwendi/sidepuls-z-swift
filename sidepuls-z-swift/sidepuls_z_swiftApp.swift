@@ -4,6 +4,7 @@ import SwiftUI
 
 @main
 struct SidePulseCommandCenterApp: App {
+    @NSApplicationDelegateAdaptor(SidePulseAppDelegate.self) private var appDelegate
     @State private var store = CommandCenterStore()
     @StateObject private var menuBarIconAnimator = MenuBarIconAnimator()
     private let menuBarIconImageCache = MenuBarIconImageCache()
@@ -332,6 +333,15 @@ struct SidePulseMenuBarView: View {
                 .pickerStyle(.menu)
                 .frame(width: 150)
             }
+
+            Toggle(isOn: Binding(
+                get: { store.statusOverlayEnabled },
+                set: { store.setStatusOverlayEnabled($0) }
+            )) {
+                Label("Status popout under notch", systemImage: "macbook")
+                    .font(.caption.weight(.medium))
+            }
+            .toggleStyle(.switch)
 
             HStack(alignment: .top, spacing: 14) {
                 VStack(spacing: 7) {
