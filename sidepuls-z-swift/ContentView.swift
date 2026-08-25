@@ -93,6 +93,7 @@ struct OverviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 CommandCenterHero(store: store)
+                SignalModeControl(store: store)
 
                 DashboardSectionHeader(
                     eyebrow: "LIVE HARDWARE",
@@ -102,7 +103,11 @@ struct OverviewView: View {
                 LEDDeckView(store: store)
 
                 HStack(alignment: .top, spacing: 18) {
-                    AgentGridView(store: store)
+                    if store.agentDisplayMode == .simple {
+                        SimpleSignalView(store: store)
+                    } else {
+                        AgentGridView(store: store)
+                    }
                     ActionCenterView(store: store).frame(width: 300)
                 }
             }
@@ -114,8 +119,9 @@ struct OverviewView: View {
 struct CommandCenterHero: View {
     @Bindable var store: CommandCenterStore
 
-    private var activeCount: Int { store.scene.placementsTopToBottom.count }
+    private var activeCount: Int { store.agents.count }
     private var finishedPlacement: AgentArrayPlacement? {
+        guard store.agentDisplayMode == .perAgent else { return nil }
         let placements = store.scene.placementsTopToBottom
         guard !placements.isEmpty, placements.allSatisfy({ $0.agent.state == .completed }) else { return nil }
         return placements.first
@@ -125,6 +131,7 @@ struct CommandCenterHero: View {
         if !store.device.connected { return "Connect your SidePulse" }
         if !store.liveOutputEnabled { return "Turn on Live Output" }
         if activeCount == 0 { return "Start an agent" }
+        if store.agentDisplayMode == .simple, store.aggregateState == .completed { return "Run finished" }
         if finishedPlacement != nil { return "Run finished" }
         return "SidePulse is live"
     }
@@ -138,6 +145,12 @@ struct CommandCenterHero: View {
         }
         if activeCount == 0 {
             return "Start or resume a Codex task. It will appear here automatically—there is no extra setup step."
+        }
+        if store.agentDisplayMode == .simple {
+            if store.aggregateState == .completed {
+                return "The full array stays green until the finished work is acknowledged."
+            }
+            return "The full array shows one prioritized state across \(activeCount) detected session\(activeCount == 1 ? "" : "s"). Tool activity is included in Thinking."
         }
         if finishedPlacement != nil {
             return "Green stays lit until the result is acknowledged. Open the finished session, return to Codex, or open the lid when you are ready for the next run."
@@ -155,6 +168,7 @@ struct CommandCenterHero: View {
     private var statusLabel: String {
         if !store.device.connected || !store.liveOutputEnabled { return "ACTION NEEDED" }
         if activeCount == 0 { return "READY" }
+        if store.agentDisplayMode == .simple, store.aggregateState == .completed { return "READY FOR YOU" }
         if finishedPlacement != nil { return "READY FOR YOU" }
         return "LIVE NOW"
     }
@@ -234,6 +248,11 @@ struct CommandCenterHero: View {
                 store.openCodex()
             }
             .buttonStyle(.glassProminent)
+        } else if store.agentDisplayMode == .simple, store.aggregateState == .completed {
+            Button("View Finished Runs", systemImage: "checkmark.circle.fill") {
+                store.selectedSection = .agents
+            }
+            .buttonStyle(.glassProminent)
         } else if let finishedPlacement {
             Button("Open Finished Run", systemImage: "checkmark.circle.fill") {
                 store.selectAgent(finishedPlacement.agent)
@@ -245,6 +264,40 @@ struct CommandCenterHero: View {
             }
             .buttonStyle(.glassProminent)
         }
+    }
+}
+
+struct SignalModeControl: View {
+    @Bindable var store: CommandCenterStore
+
+    var body: some View {
+        HStack(spacing: 18) {
+            Image(systemName: store.agentDisplayMode == .simple ? "circle.grid.2x2.fill" : "square.grid.3x3.fill")
+                .font(.title2)
+                .foregroundStyle(.cyan)
+                .frame(width: 44, height: 44)
+                .background(.cyan.opacity(0.1), in: .circle)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Signal Mode")
+                    .font(.headline)
+                Text(store.agentDisplayMode.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Picker("Signal Mode", selection: Binding(
+                get: { store.agentDisplayMode },
+                set: { store.selectAgentDisplayMode($0) }
+            )) {
+                ForEach(AgentDisplayMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 240)
+        }
+        .padding(18)
+        .glassEffect(.regular.tint(.cyan.opacity(0.06)), in: .rect(cornerRadius: 22))
     }
 }
 
@@ -340,7 +393,9 @@ struct LEDDeckView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("ASSIGNED SESSIONS · TOP TO BOTTOM")
+                        Text(store.agentDisplayMode == .simple
+                            ? "ONE SIGNAL · FULL ARRAY"
+                            : "ASSIGNED SESSIONS · TOP TO BOTTOM")
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(.secondary)
                         if store.scene.placementsTopToBottom.isEmpty {
@@ -355,10 +410,14 @@ struct LEDDeckView: View {
                                         .shadow(color: color.opacity(0.7), radius: 7)
                                         .frame(width: 7, height: 34)
                                     VStack(alignment: .leading, spacing: 3) {
-                                        Text(placement.agent.name)
+                                        Text(store.agentDisplayMode == .simple
+                                            ? placement.agent.state.title
+                                            : placement.agent.name)
                                             .font(.subheadline.weight(.semibold))
                                             .lineLimit(1)
-                                        Text("\(placement.rangeLabel) · \(placement.agent.state.title)")
+                                        Text(store.agentDisplayMode == .simple
+                                            ? "All LEDs · highest-priority state"
+                                            : "\(placement.rangeLabel) · \(placement.agent.state.title)")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -459,6 +518,42 @@ struct AgentGridView: View {
     }
 }
 
+struct SimpleSignalView: View {
+    @Bindable var store: CommandCenterStore
+
+    var body: some View {
+        let state = store.aggregateState
+        let color = Color(hex: store.selectedProfile.style(for: state).colorHex)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("One signal").font(.title2.bold())
+            Text("The highest-priority state owns the entire array. Individual sessions stay available in Agents without competing for LEDs.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 16) {
+                Image(systemName: state.symbol)
+                    .font(.title)
+                    .foregroundStyle(color)
+                    .frame(width: 54, height: 54)
+                    .background(color.opacity(0.12), in: .circle)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(state.title)
+                        .font(.title3.bold())
+                    Text("\(store.agents.count) detected session\(store.agents.count == 1 ? "" : "s") · all \(store.device.ledCount) LEDs")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(18)
+            .glassEffect(.regular.tint(color.opacity(0.1)), in: .rect(cornerRadius: 20))
+            Text("Failure → Approval → Thinking → Done · tools count as Thinking")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 struct AgentCard: View {
     let agent: AgentSession
     let profile: LightingProfile
@@ -543,7 +638,12 @@ struct ActionCenterView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Label("Active sessions stay on", systemImage: "checkmark.circle.fill")
                 Label("Finished sessions stay green until acknowledged", systemImage: "checkmark.circle.fill")
-                Label("Activity never reshuffles residents", systemImage: "checkmark.circle.fill")
+                if store.agentDisplayMode == .simple {
+                    Label("Tool activity counts as Thinking", systemImage: "checkmark.circle.fill")
+                    Label("Priority state owns the full array", systemImage: "checkmark.circle.fill")
+                } else {
+                    Label("Activity never reshuffles residents", systemImage: "checkmark.circle.fill")
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -616,7 +716,9 @@ struct LightingStudioView: View {
         HStack(alignment: .top, spacing: 20) {
             ScrollView {
                 VStack(spacing: 12) {
-                    ForEach(AgentState.allCases) { state in
+                    ForEach(AgentState.allCases.filter {
+                        store.agentDisplayMode == .perAgent || $0 != .toolRunning
+                    }) { state in
                         StateStyleRow(
                             style: store.selectedProfile.style(for: state),
                             selected: store.selectedState == state,

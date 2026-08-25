@@ -164,6 +164,7 @@ enum ProfileLibrary {
 enum AppPreferences {
     private static let liveOutputKey = "sidepulse.live-output-enabled.v1"
     private static let batteryIndicatorKey = "sidepulse.battery-indicator.v1"
+    private static let agentDisplayModeKey = "sidepulse.agent-display-mode.v1"
 
     static func liveOutputEnabled(from defaults: UserDefaults = .standard) -> Bool {
         guard defaults.object(forKey: liveOutputKey) != nil else {
@@ -176,6 +177,20 @@ enum AppPreferences {
 
     static func saveLiveOutputEnabled(_ enabled: Bool, to defaults: UserDefaults = .standard) {
         defaults.set(enabled, forKey: liveOutputKey)
+    }
+
+    static func agentDisplayMode(from defaults: UserDefaults = .standard) -> AgentDisplayMode {
+        guard let rawValue = defaults.string(forKey: agentDisplayModeKey),
+              let mode = AgentDisplayMode(rawValue: rawValue)
+        else { return .simple }
+        return mode
+    }
+
+    static func saveAgentDisplayMode(
+        _ mode: AgentDisplayMode,
+        to defaults: UserDefaults = .standard
+    ) {
+        defaults.set(mode.rawValue, forKey: agentDisplayModeKey)
     }
 
     static func batteryIndicatorSettings(

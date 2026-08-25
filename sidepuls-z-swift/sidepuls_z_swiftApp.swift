@@ -35,6 +35,16 @@ struct SidePulseMenuBarView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Picker("Signal Mode", selection: Binding(
+                get: { store.agentDisplayMode },
+                set: { store.selectAgentDisplayMode($0) }
+            )) {
+                ForEach(AgentDisplayMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
             HStack(alignment: .top, spacing: 14) {
                 VStack(spacing: 7) {
                     ForEach(store.scene.slots.sorted(by: { $0.index > $1.index })) { slot in
@@ -47,41 +57,67 @@ struct SidePulseMenuBarView: View {
                         }
                     }
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("PHYSICAL ARRAY · TOP TO BOTTOM")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                    if store.scene.placementsTopToBottom.isEmpty {
-                        Text("No sessions on the array · lights off")
+                if store.agentDisplayMode == .simple {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("ONE SIGNAL · FULL ARRAY")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                        HStack(spacing: 9) {
+                            Image(systemName: store.aggregateState.symbol)
+                                .font(.title3)
+                                .frame(width: 24)
+                            Text(store.aggregateState.title)
+                                .font(.headline)
+                        }
+                        Text("Highest-priority state across \(store.agents.count) detected session\(store.agents.count == 1 ? "" : "s").")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(store.scene.placementsTopToBottom) { placement in
-                            Button {
-                                if placement.agent.openURL == nil {
-                                    openWindow(id: "command-center")
-                                    NSApp.activate(ignoringOtherApps: true)
-                                }
-                                store.selectAgent(placement.agent)
-                            } label: {
-                                HStack(spacing: 7) {
-                                    Image(systemName: placement.agent.state.symbol)
-                                        .frame(width: 20)
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(placement.agent.name).lineLimit(1)
-                                        Text(placement.rangeLabel)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Failure → Approval → Thinking → Done")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Text("Tool activity is included in Thinking.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("PHYSICAL ARRAY · TOP TO BOTTOM")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                        if store.scene.placementsTopToBottom.isEmpty {
+                            Text("No sessions on the array · lights off")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(store.scene.placementsTopToBottom) { placement in
+                                Button {
+                                    if placement.agent.openURL == nil {
+                                        openWindow(id: "command-center")
+                                        NSApp.activate(ignoringOtherApps: true)
                                     }
+                                    store.selectAgent(placement.agent)
+                                } label: {
+                                    HStack(spacing: 7) {
+                                        Image(systemName: placement.agent.state.symbol)
+                                            .frame(width: 20)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(placement.agent.name).lineLimit(1)
+                                            Text(placement.rangeLabel)
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .padding(.vertical, 4)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                .padding(.vertical, 4)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Divider()

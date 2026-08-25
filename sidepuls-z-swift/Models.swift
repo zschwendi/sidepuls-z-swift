@@ -102,6 +102,29 @@ enum AgentState: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum AgentDisplayMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case simple
+    case perAgent
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .simple: "Simple"
+        case .perAgent: "Per Agent"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .simple:
+            "Use the entire array for one prioritized state. Tool activity counts as Thinking."
+        case .perAgent:
+            "Give each visible session its own stable portion of the array."
+        }
+    }
+}
+
 struct AgentSession: Identifiable, Codable, Hashable, Sendable {
     let id: String
     var provider: AgentProvider
@@ -119,6 +142,73 @@ struct AgentSession: Identifiable, Codable, Hashable, Sendable {
     var subtitle: String {
         if let toolName, !toolName.isEmpty { return toolName }
         return provider.title
+    }
+}
+
+enum AgentDisplayPolicy {
+    static func aggregateState(
+        for agents: [AgentSession],
+        mode: AgentDisplayMode
+    ) -> AgentState {
+        switch mode {
+        case .simple:
+            return simpleState(for: agents)
+        case .perAgent:
+            return agents.min(by: {
+                if $0.state.priority != $1.state.priority {
+                    return $0.state.priority < $1.state.priority
+                }
+                return $0.updatedAt > $1.updatedAt
+            })?.state ?? .idle
+        }
+    }
+
+    static func lightingSessions(
+        from agents: [AgentSession],
+        mode: AgentDisplayMode
+    ) -> [AgentSession] {
+        guard mode == .simple else { return agents }
+        let active = agents.filter { $0.state != .idle }
+        guard !active.isEmpty else { return [] }
+
+        let state = simpleState(for: active)
+        let newestUpdate = active.map(\.updatedAt).max() ?? .now
+        return [
+            AgentSession(
+                id: "sidepulse:simple-signal",
+                provider: .unknown,
+                sessionID: "simple-signal",
+                name: "Combined signal",
+                project: "SidePulse",
+                cwd: nil,
+                state: state,
+                eventName: "SimpleMode",
+                toolName: nil,
+                updatedAt: newestUpdate,
+                message: nil
+            ),
+        ]
+    }
+
+    private static func simpleState(for agents: [AgentSession]) -> AgentState {
+        agents
+            .map { normalizedSimpleState($0.state) }
+            .min(by: { simplePriority($0) < simplePriority($1) })
+            ?? .idle
+    }
+
+    private static func normalizedSimpleState(_ state: AgentState) -> AgentState {
+        state == .toolRunning ? .working : state
+    }
+
+    private static func simplePriority(_ state: AgentState) -> Int {
+        switch state {
+        case .error: 0
+        case .waiting: 1
+        case .working, .toolRunning: 2
+        case .completed: 3
+        case .idle: 4
+        }
     }
 }
 

@@ -35,6 +35,8 @@ enum SceneCompilerSmoke {
         precondition(profile.style(for: .error).motion == .solid)
         precondition(!AgentState.allCases.contains(where: { $0.rawValue == "progress" }))
 
+        assertSimpleDisplayPolicy(now: now, compiler: compiler)
+
         var breatheAllocator = StableSlotAllocator()
         let breathe = compiler.compile(
             profile: profile,
@@ -392,6 +394,51 @@ enum SceneCompilerSmoke {
             dumpFirmwarePrograms(now: now, compiler: compiler)
         }
         print("Scene compiler smoke passed: configurable battery modes, device discovery, motion geometry, color modes, adaptive stable layouts")
+    }
+
+    private static func assertSimpleDisplayPolicy(
+        now: Date,
+        compiler: LightingSceneCompiler
+    ) {
+        var done = session("simple:done", updatedAt: now.addingTimeInterval(-4))
+        done.state = .completed
+        var thinking = session("simple:thinking", updatedAt: now.addingTimeInterval(-3))
+        thinking.state = .working
+        var tool = session("simple:tool", updatedAt: now.addingTimeInterval(-2))
+        tool.state = .toolRunning
+        var approval = session("simple:approval", updatedAt: now.addingTimeInterval(-1))
+        approval.state = .waiting
+        var failure = session("simple:failure", updatedAt: now)
+        failure.state = .error
+
+        precondition(AgentDisplayPolicy.aggregateState(for: [], mode: .simple) == .idle)
+        precondition(AgentDisplayPolicy.lightingSessions(from: [], mode: .simple).isEmpty)
+        precondition(AgentDisplayPolicy.aggregateState(for: [done], mode: .simple) == .completed)
+        precondition(AgentDisplayPolicy.aggregateState(for: [done, tool], mode: .simple) == .working)
+        precondition(AgentDisplayPolicy.aggregateState(for: [done, thinking, tool, approval], mode: .simple) == .waiting)
+        precondition(AgentDisplayPolicy.aggregateState(for: [done, thinking, tool, approval, failure], mode: .simple) == .error)
+
+        let source = [done, thinking, tool]
+        let simple = AgentDisplayPolicy.lightingSessions(from: source, mode: .simple)
+        precondition(simple.count == 1)
+        precondition(simple[0].id == "sidepulse:simple-signal")
+        precondition(simple[0].state == .working, "Tool activity must use Thinking in Simple mode")
+        precondition(simple[0].toolName == nil)
+        precondition(AgentDisplayPolicy.lightingSessions(from: source, mode: .perAgent) == source)
+
+        var allocator = StableSlotAllocator()
+        let scene = compiler.compile(
+            profile: .factoryDefault,
+            agents: simple,
+            allocator: &allocator,
+            ledCount: 8,
+            now: now
+        )
+        precondition(scene.slots.count == 8)
+        precondition(scene.slots.allSatisfy { $0.agent?.id == "sidepulse:simple-signal" })
+        precondition(scene.placementsTopToBottom.count == 1)
+        precondition(scene.placementsTopToBottom[0].ledIndices.count == 8)
+        precondition(scene.program.contains("7:#6A1259"), "Simple Thinking must animate the full Pro array")
     }
 
     private static func dumpFirmwarePrograms(now: Date, compiler: LightingSceneCompiler) {

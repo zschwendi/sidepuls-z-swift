@@ -62,6 +62,7 @@ final class CommandCenterStore {
     var hardwareDevices: [DeviceState] { [proDevice, dotDevice] }
     var batteryState: BatteryState?
     var batterySettings = AppPreferences.batteryIndicatorSettings()
+    var agentDisplayMode = AppPreferences.agentDisplayMode()
     var lidIsClosed: Bool?
     var lastLidTransitionAt: Date?
     var scene = CompiledScene(program: "", slots: [])
@@ -159,7 +160,11 @@ final class CommandCenterStore {
     }
 
     var aggregateState: AgentState {
-        agents.min(by: { $0.state.priority < $1.state.priority })?.state ?? .idle
+        AgentDisplayPolicy.aggregateState(for: agents, mode: agentDisplayMode)
+    }
+
+    var lightingAgents: [AgentSession] {
+        AgentDisplayPolicy.lightingSessions(from: agents, mode: agentDisplayMode)
     }
 
     func selectProfile(_ id: UUID) {
@@ -168,6 +173,17 @@ final class CommandCenterStore {
         resetAllocators()
         recompile()
         persistProfiles()
+    }
+
+    func selectAgentDisplayMode(_ mode: AgentDisplayMode) {
+        guard agentDisplayMode != mode else { return }
+        agentDisplayMode = mode
+        if mode == .simple, selectedState == .toolRunning {
+            selectedState = .working
+        }
+        AppPreferences.saveAgentDisplayMode(mode)
+        resetAllocators()
+        recompile()
     }
 
     func updateSelectedProfile(_ update: (inout LightingProfile) -> Void) {
@@ -297,15 +313,16 @@ final class CommandCenterStore {
     }
 
     func recompile() {
+        let displayedAgents = lightingAgents
         proScene = compiler.compile(
             profile: selectedProfile,
-            agents: agents,
+            agents: displayedAgents,
             allocator: &proAllocator,
             ledCount: SidePulseDeviceKind.pro.ledCount
         )
         dotScene = compiler.compile(
             profile: selectedProfile,
-            agents: agents,
+            agents: displayedAgents,
             allocator: &dotAllocator,
             ledCount: SidePulseDeviceKind.dot.ledCount
         )

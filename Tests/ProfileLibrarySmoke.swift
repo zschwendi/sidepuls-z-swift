@@ -129,6 +129,9 @@ enum ProfileLibrarySmoke {
         let preferencesSuiteName = "sidepulse.preferences-smoke.\(UUID().uuidString)"
         let preferencesDefaults = UserDefaults(suiteName: preferencesSuiteName)!
         defer { preferencesDefaults.removePersistentDomain(forName: preferencesSuiteName) }
+        precondition(AppPreferences.agentDisplayMode(from: preferencesDefaults) == .simple)
+        AppPreferences.saveAgentDisplayMode(.perAgent, to: preferencesDefaults)
+        precondition(AppPreferences.agentDisplayMode(from: preferencesDefaults) == .perAgent)
         precondition(AppPreferences.batteryIndicatorSettings(from: preferencesDefaults) == BatteryIndicatorSettings())
         var batterySettings = BatteryIndicatorSettings()
         batterySettings.mode = .statusBottom
@@ -138,7 +141,7 @@ enum ProfileLibrarySmoke {
         AppPreferences.saveBatteryIndicatorSettings(batterySettings, to: preferencesDefaults)
         precondition(AppPreferences.batteryIndicatorSettings(from: preferencesDefaults) == batterySettings)
 
-        print("Profile library smoke passed: profiles and battery indication preferences persist independently")
+        print("Profile library smoke passed: profiles, display mode, and battery preferences persist independently")
     }
 
     private static func require<T>(_ value: T?) throws -> T {
