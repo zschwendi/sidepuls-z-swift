@@ -63,6 +63,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
     private let latestStateURL: URL
     private let codexSessionsRoot: URL
     private let codexSessionIndexURL: URL
+    private let grokBotPersistenceRoot: URL
     private let usesPersistentAppState: Bool
     private var server: LocalUnixEventServer?
     private var timer: DispatchSourceTimer?
@@ -78,6 +79,9 @@ final class NativeAgentRuntime: @unchecked Sendable {
     private var threadNames: [String: String] = [:]
     private var threadIndexModification: Date?
     private var codexMetadataCache: [URL: [String: Any]] = [:]
+    private var grokBotDiscoveredKeys: Set<String> = []
+    private var grokBotDocumentCache: [URL: GrokBotCachedDocument] = [:]
+    private var grokBotLastEventAt: Date?
     private var ownsSocket = false
     private var lastLatestModification: Date?
     private var lastPublishedSignature = ""
@@ -110,6 +114,13 @@ final class NativeAgentRuntime: @unchecked Sendable {
         )
         codexSessionsRoot = codexHome.appending(path: "sessions", directoryHint: .isDirectory)
         codexSessionIndexURL = codexHome.appending(path: "session_index.jsonl")
+        grokBotPersistenceRoot = URL(
+            fileURLWithPath: environment["GROK_BOT_PERSISTENCE_PATH"]
+                ?? FileManager.default.homeDirectoryForCurrentUser
+                    .appending(path: "Library/Application Support/Grok Bot/sand-client-persistence")
+                    .path,
+            isDirectory: true
+        )
     }
 
     func start() {
@@ -172,6 +183,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
             let now = Date.now
             if now.timeIntervalSince(lastDiscoveryScan) >= 0.75 {
                 discoverCodexSessionsLocked(now: now)
+                discoverGrokBotSessionsLocked(now: now)
                 lastDiscoveryScan = now
             }
             if now.timeIntervalSince(lastCloudRefresh) >= 15 {
@@ -301,7 +313,9 @@ final class NativeAgentRuntime: @unchecked Sendable {
 
     private func publishLocked(force: Bool = false) {
         let visible = visibleSessionsLocked()
-        let ownership = ownsSocket ? "Local + cloud discovery · live hooks" : "Local + cloud agent discovery"
+        let ownership = ownsSocket
+            ? "Unified agent hub · local + cloud discovery · live hooks"
+            : "Unified agent hub · local + cloud discovery"
         let runningCount = visible.filter { $0.state != .completed }.count
         let finishedCount = visible.count - runningCount
         let statusParts = [
@@ -509,6 +523,236 @@ private extension NativeAgentRuntime {
             if ownsSocket { writeLatestStateLocked() }
             publishLocked(force: true)
         }
+    }
+
+    func discoverGrokBotSessionsLocked(now: Date) {
+        let manager = FileManager.default
+        let resourceKeys: Set<URLResourceKey> = [
+            .contentModificationDateKey, .fileSizeKey, .isRegularFileKey,
+        ]
+        guard let urls = try? manager.contentsOfDirectory(
+            at: grokBotPersistenceRoot,
+            includingPropertiesForKeys: Array(resourceKeys),
+            options: [.skipsHiddenFiles]
+        ) else {
+            removeGrokBotSessionsLocked()
+            grokBotLastEventAt = nil
+            return
+        }
+
+        var rosterURL: URL?
+        var transcriptURLs: [String: URL] = [:]
+        var newestModification: Date?
+
+        for url in urls where url.pathExtension == "blob" {
+            guard let values = try? url.resourceValues(forKeys: resourceKeys),
+                  values.isRegularFile == true,
+                  (values.fileSize ?? 0) <= 2_097_152,
+                  let persistenceKey = grokBotPersistenceKey(for: url)
+            else { continue }
+
+            if let modified = values.contentModificationDate {
+                newestModification = max(newestModification ?? .distantPast, modified)
+            }
+            if persistenceKey.hasSuffix(".roster.last-roster") {
+                rosterURL = url
+            } else if let markerRange = persistenceKey.range(of: ".transcript.replicas.") {
+                let sessionID = String(persistenceKey[markerRange.upperBound...])
+                if !sessionID.isEmpty { transcriptURLs[sessionID.lowercased()] = url }
+            }
+        }
+        grokBotLastEventAt = newestModification
+
+        guard let rosterURL,
+              let roster = readGrokBotDocument(rosterURL),
+              let value = roster["value"] as? [String: Any],
+              let rows = value["rows"] as? [[String: Any]]
+        else {
+            removeGrokBotSessionsLocked()
+            return
+        }
+
+        var discovered: [String: AgentSession] = [:]
+        for row in rows {
+            guard let sessionID = string(in: row, keys: ["id"]), !sessionID.isEmpty else { continue }
+            let key = "grok_bot:session:\(sessionID)"
+            let transcript = transcriptURLs[sessionID.lowercased()].flatMap(readGrokBotDocument)
+            let activity = inferGrokBotActivity(row: row, transcript: transcript, now: now)
+            let updatedAt = min(now, activity.updatedAt)
+            let previous = sessions[key]
+
+            let session = AgentSession(
+                id: key,
+                provider: .grokBot,
+                sessionID: sessionID,
+                name: string(in: row, keys: ["name", "title"])
+                    ?? previous?.name
+                    ?? "Grok Bot (\(String(sessionID.prefix(8))))",
+                project: "Grok Bot",
+                cwd: string(in: row, keys: ["path"]),
+                state: activity.state,
+                eventName: activity.eventName,
+                toolName: activity.toolName,
+                updatedAt: updatedAt,
+                message: "Detected from Grok Bot local activity",
+                openURL: URL(string: "grokbot://")
+            )
+
+            let isRecent = now.timeIntervalSince(updatedAt) <= 15 * 60
+            if isRecent || activity.state == .waiting || previous.map(shouldContinueTracking) == true {
+                discovered[key] = session
+            }
+        }
+
+        let newKeys = Set(discovered.keys)
+        var changed = false
+        for key in grokBotDiscoveredKeys.subtracting(newKeys) where sessions.removeValue(forKey: key) != nil {
+            changed = true
+        }
+        for (key, session) in discovered where sessions[key] != session {
+            sessions[key] = session
+            changed = true
+        }
+        grokBotDiscoveredKeys = newKeys
+
+        if changed {
+            if ownsSocket { writeLatestStateLocked() }
+            publishLocked(force: true)
+        }
+    }
+
+    func removeGrokBotSessionsLocked() {
+        var changed = false
+        for key in grokBotDiscoveredKeys where sessions.removeValue(forKey: key) != nil {
+            changed = true
+        }
+        grokBotDiscoveredKeys.removeAll()
+        grokBotDocumentCache.removeAll()
+        if changed {
+            if ownsSocket { writeLatestStateLocked() }
+            publishLocked(force: true)
+        }
+    }
+
+    func grokBotPersistenceKey(for url: URL) -> String? {
+        let encoded = url.deletingPathExtension().lastPathComponent.uppercased()
+        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
+        let values = Dictionary(uniqueKeysWithValues: alphabet.enumerated().map { ($0.element, $0.offset) })
+        var buffer = 0
+        var bitCount = 0
+        var bytes: [UInt8] = []
+
+        for character in encoded where character != "=" {
+            guard let value = values[character] else { return nil }
+            buffer = (buffer << 5) | value
+            bitCount += 5
+            if bitCount >= 8 {
+                bitCount -= 8
+                bytes.append(UInt8((buffer >> bitCount) & 0xFF))
+                buffer = bitCount == 0 ? 0 : buffer & ((1 << bitCount) - 1)
+            }
+        }
+        return String(bytes: bytes, encoding: .utf8)
+    }
+
+    func readGrokBotDocument(_ url: URL) -> [String: Any]? {
+        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+              (values.fileSize ?? 0) <= 2_097_152
+        else { return nil }
+        let modifiedAt = values.contentModificationDate
+        if let cached = grokBotDocumentCache[url], cached.modifiedAt == modifiedAt {
+            return cached.document
+        }
+        guard let data = try? Data(contentsOf: url),
+              let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        grokBotDocumentCache[url] = GrokBotCachedDocument(
+            modifiedAt: modifiedAt,
+            document: document
+        )
+        return document
+    }
+
+    func inferGrokBotActivity(
+        row: [String: Any],
+        transcript: [String: Any]?,
+        now: Date
+    ) -> GrokBotActivity {
+        let rowUpdatedAt = grokBotDate(in: row, keys: ["lastActivityAt", "updatedAt"]) ?? .distantPast
+        let transcriptValue = transcript?["value"] as? [String: Any]
+        let persistedAt = transcriptValue.flatMap { grokBotDate(in: $0, keys: ["persistedAt"]) }
+        let entries = transcriptValue?["entries"] as? [[String: Any]] ?? []
+
+        if row["awaitingUserResponse"] as? Bool == true || grokBotHasPendingPermission(entries) {
+            return GrokBotActivity(
+                state: .waiting,
+                eventName: "GrokBotNeedsApproval",
+                toolName: "Waiting for you",
+                updatedAt: [rowUpdatedAt, persistedAt].compactMap { $0 }.max() ?? now
+            )
+        }
+
+        let latest = entries.last
+        let latestMessage = latest?["message"] as? [String: Any]
+        let latestTimestamp = latest.flatMap { grokBotDate(in: $0, keys: ["timestampMs", "createdAt"]) }
+        let updatedAt = [rowUpdatedAt, persistedAt, latestTimestamp].compactMap { $0 }.max() ?? now
+        let isStreaming = latest?["isStreaming"] as? Bool == true
+            || latestMessage?["isStreaming"] as? Bool == true
+        if isStreaming {
+            return GrokBotActivity(
+                state: .working,
+                eventName: "GrokBotStreaming",
+                toolName: nil,
+                updatedAt: updatedAt
+            )
+        }
+
+        let latestKind = [
+            string(in: latest ?? [:], keys: ["kind", "type"]),
+            string(in: latestMessage ?? [:], keys: ["type", "kind"]),
+        ].compactMap { $0 }.joined(separator: " ").lowercased()
+        if latestKind.contains("tool") || latestKind.contains("command") {
+            return GrokBotActivity(
+                state: now.timeIntervalSince(updatedAt) <= 8 ? .toolRunning : .completed,
+                eventName: "GrokBotToolActivity",
+                toolName: "Tool",
+                updatedAt: updatedAt
+            )
+        }
+
+        let state: AgentState = now.timeIntervalSince(updatedAt) <= 8 ? .working : .completed
+        return GrokBotActivity(
+            state: state,
+            eventName: state == .working ? "GrokBotWorking" : "GrokBotTurnComplete",
+            toolName: nil,
+            updatedAt: updatedAt
+        )
+    }
+
+    func grokBotHasPendingPermission(_ entries: [[String: Any]]) -> Bool {
+        for entry in entries.reversed() {
+            guard let message = entry["message"] as? [String: Any] else { continue }
+            let type = string(in: message, keys: ["type", "kind"])?.lowercased() ?? ""
+            guard type.contains("permission") else { continue }
+            if let ask = message["ask"] as? [String: Any] {
+                return string(in: ask, keys: ["status"])?.lowercased() == "pending"
+            }
+            return false
+        }
+        return false
+    }
+
+    func grokBotDate(in dictionary: [String: Any], keys: [String]) -> Date? {
+        for key in keys {
+            if let number = dictionary[key] as? NSNumber {
+                let value = number.doubleValue
+                return Date(timeIntervalSince1970: value > 10_000_000_000 ? value / 1_000 : value)
+            }
+            if let text = dictionary[key] as? String, let value = Double(text) {
+                return Date(timeIntervalSince1970: value > 10_000_000_000 ? value / 1_000 : value)
+            }
+        }
+        return nil
     }
 
     func shouldContinueTracking(_ session: AgentSession) -> Bool {
@@ -756,6 +1000,8 @@ private extension NativeAgentRuntime {
             switch provider {
             case .codex:
                 configured = FileManager.default.fileExists(atPath: codexSessionsRoot.path)
+            case .grokBot:
+                configured = FileManager.default.fileExists(atPath: grokBotPersistenceRoot.path)
             case .claude:
                 configured = integrationFileContainsSidePulse(
                     FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/settings.json")
@@ -787,8 +1033,8 @@ private extension NativeAgentRuntime {
                 } else {
                     detail = "\(active.count) local session\(active.count == 1 ? "" : "s") detected"
                 }
-            } else if provider == .codex {
-                detail = "Watching local Codex sessions automatically"
+            } else if provider == .codex || provider == .grokBot {
+                detail = "Watching local \(provider.title) sessions automatically"
             } else if configured {
                 detail = logDate == nil ? "Hooks installed · no events seen yet" : "Hooks installed · ready for the next event"
             } else {
@@ -813,6 +1059,7 @@ private extension NativeAgentRuntime {
     }
 
     func providerLogModificationDate(_ provider: AgentProvider) -> Date? {
+        if provider == .grokBot { return grokBotLastEventAt }
         let url = stateRoot.appending(path: "\(provider.rawValue).jsonl")
         guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
               (values.fileSize ?? 0) > 0
@@ -920,6 +1167,18 @@ private struct CodexActivity {
     var state: AgentState
     var eventName: String
     var toolName: String?
+}
+
+private struct GrokBotCachedDocument {
+    var modifiedAt: Date?
+    var document: [String: Any]
+}
+
+private struct GrokBotActivity {
+    var state: AgentState
+    var eventName: String
+    var toolName: String?
+    var updatedAt: Date
 }
 
 private struct CodexCloudTaskList: Decodable {

@@ -646,7 +646,7 @@ struct ActionCenterView: View {
             } label: {
                 OverviewActionLabel(
                     title: "Manage connections",
-                    detail: "Codex, Claude, Grok, and cloud",
+                    detail: "Codex, Grok Bot, Grok, Claude, and cloud",
                     symbol: "link"
                 )
             }

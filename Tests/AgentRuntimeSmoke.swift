@@ -39,6 +39,8 @@ enum AgentRuntimeSmoke {
         let abortedID = "runtime-smoke-aborted-\(UUID().uuidString)"
         let toolID = "runtime-smoke-tool-\(UUID().uuidString)"
         let recoverableID = "runtime-smoke-recoverable-\(UUID().uuidString)"
+        let grokHookID = "runtime-smoke-grok-hook-\(UUID().uuidString)"
+        let grokBotID = UUID().uuidString
         let completedURL = transcriptFolder.appending(path: "completed.jsonl")
         try writeTranscript(url: completedURL, id: completedID, payload: ["type": "task_complete"])
         try writeTranscript(url: transcriptFolder.appending(path: "aborted.jsonl"), id: abortedID, payload: [
@@ -51,15 +53,19 @@ enum AgentRuntimeSmoke {
             recordType: "response_item",
             payload: ["type": "custom_tool_call", "name": "exec"]
         )
+        let grokBotPersistence = temporaryRoot.appending(path: "grok-bot", directoryHint: .isDirectory)
+        try writeGrokBotFixture(root: grokBotPersistence, sessionID: grokBotID)
 
         let socketPath = temporaryRoot.appending(path: "events.sock").path
         setenv("SIDEPULSE_EVENT_SOCKET_PATH", socketPath, 1)
         setenv("SIDEPULSE_LATEST_STATE_PATH", temporaryRoot.appending(path: "latest.json").path, 1)
         setenv("CODEX_HOME", codexHome.path, 1)
+        setenv("GROK_BOT_PERSISTENCE_PATH", grokBotPersistence.path, 1)
         defer {
             unsetenv("SIDEPULSE_EVENT_SOCKET_PATH")
             unsetenv("SIDEPULSE_LATEST_STATE_PATH")
             unsetenv("CODEX_HOME")
+            unsetenv("GROK_BOT_PERSISTENCE_PATH")
         }
 
         let probe = RuntimeProbe()
@@ -69,7 +75,8 @@ enum AgentRuntimeSmoke {
             let states = Dictionary(uniqueKeysWithValues: agents.map { ($0.sessionID, $0.state) })
             if states[completedID] == .completed,
                states[abortedID] == .error,
-               states[toolID] == .toolRunning {
+               states[toolID] == .toolRunning,
+               states[grokBotID] == .waiting {
                 detected.signal()
             }
         }
@@ -77,6 +84,18 @@ enum AgentRuntimeSmoke {
         runtime.start()
         let result = detected.wait(timeout: .now() + 3)
         precondition(result == .success, "Expected deterministic local Codex fixtures")
+
+        try sendHook(
+            path: socketPath,
+            provider: "grok",
+            eventName: "UserPromptSubmit",
+            sessionID: grokHookID,
+            toolResponse: [:]
+        )
+        precondition(
+            waitForState(probe: probe, sessionID: grokHookID, state: .working),
+            "Expected the separate Grok hook provider to remain active"
+        )
 
         try sendHook(
             path: socketPath,
@@ -119,6 +138,18 @@ enum AgentRuntimeSmoke {
             agents.contains(where: { $0.sessionID == abortedID && $0.state == .error }),
             "An aborted Codex turn must be red, not successful green"
         )
+        precondition(
+            agents.contains(where: { $0.sessionID == grokBotID && $0.provider == .grokBot && $0.state == .waiting }),
+            "Grok Bot local sessions must merge into the hub as a distinct provider"
+        )
+        precondition(
+            agents.contains(where: { $0.sessionID == grokHookID && $0.provider == .grok }),
+            "Grok hooks and Grok Bot must remain separate providers"
+        )
+        precondition(
+            agents.first(where: { $0.sessionID == toolID })?.openURL?.scheme == "codex",
+            "Local Codex sessions must expose a selectable desktop deep link"
+        )
 
         runtime.acknowledgeCompleted(sessionID: "codex:session:\(completedID)")
         Thread.sleep(forTimeInterval: 0.5)
@@ -134,10 +165,10 @@ enum AgentRuntimeSmoke {
             "Expected Codex integration to report active"
         )
         precondition(
-            agents.first(where: { $0.provider == .codex })?.openURL?.scheme == "codex",
-            "Local Codex sessions must expose a selectable desktop deep link"
+            integrations.contains(where: { $0.provider == .grokBot && $0.state == .active }),
+            "Expected Grok Bot local discovery to report active"
         )
-        print("Agent runtime smoke passed: terminal aborts stay red and recoverable tool failures stay Thinking")
+        print("Agent runtime smoke passed: Codex, Grok hooks, and Grok Bot merge without conflating providers")
     }
 
     private static func waitForState(
@@ -158,12 +189,13 @@ enum AgentRuntimeSmoke {
 
     private static func sendHook(
         path: String,
+        provider: String = "codex",
         eventName: String,
         sessionID: String,
         toolResponse: [String: Any]
     ) throws {
         let payload: [String: Any] = [
-            "provider": "codex",
+            "provider": provider,
             "line": [
                 "hook_event_name": eventName,
                 "session_id": sessionID,
@@ -222,6 +254,76 @@ enum AgentRuntimeSmoke {
             result.append(0x0A)
         }
         try data.write(to: url, options: .atomic)
+    }
+
+    private static func writeGrokBotFixture(root: URL, sessionID: String) throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let nowMilliseconds = Int(Date.now.timeIntervalSince1970 * 1_000)
+        let roster: [String: Any] = [
+            "schemaVersion": 2,
+            "value": [
+                "rows": [[
+                    "id": sessionID,
+                    "name": "Grok Bot fixture",
+                    "updatedAt": nowMilliseconds,
+                    "lastActivityAt": nowMilliseconds,
+                    "awaitingUserResponse": true,
+                ]],
+            ],
+        ]
+        let transcript: [String: Any] = [
+            "schemaVersion": 1,
+            "value": [
+                "persistedAt": nowMilliseconds,
+                "entries": [[
+                    "id": "permission-fixture",
+                    "kind": "send-message",
+                    "timestampMs": nowMilliseconds,
+                    "message": [
+                        "type": "local-tool-permission",
+                        "ask": ["status": "pending", "action": "run-command"],
+                    ],
+                ]],
+            ],
+        ]
+        try writeGrokBotBlob(
+            root: root,
+            key: "sidepulse.roster.last-roster",
+            document: roster
+        )
+        try writeGrokBotBlob(
+            root: root,
+            key: "sidepulse.transcript.replicas.\(sessionID)",
+            document: transcript
+        )
+    }
+
+    private static func writeGrokBotBlob(
+        root: URL,
+        key: String,
+        document: [String: Any]
+    ) throws {
+        let filename = base32Encode(Data(key.utf8)).lowercased() + ".blob"
+        let data = try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys])
+        try data.write(to: root.appending(path: filename), options: .atomic)
+    }
+
+    private static func base32Encode(_ data: Data) -> String {
+        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
+        var buffer = 0
+        var bitCount = 0
+        var result = ""
+        for byte in data {
+            buffer = (buffer << 8) | Int(byte)
+            bitCount += 8
+            while bitCount >= 5 {
+                bitCount -= 5
+                result.append(alphabet[(buffer >> bitCount) & 31])
+                buffer = bitCount == 0 ? 0 : buffer & ((1 << bitCount) - 1)
+            }
+        }
+        if bitCount > 0 { result.append(alphabet[(buffer << (5 - bitCount)) & 31]) }
+        return result
     }
 
     private static func testCompletionAcknowledgements() {

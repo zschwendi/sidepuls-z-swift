@@ -1,12 +1,17 @@
 import Foundation
 
 enum AgentProvider: String, Codable, CaseIterable, Identifiable, Sendable {
-    case codex, claude, grok, unknown
+    case codex
+    case grokBot = "grok_bot"
+    case grok
+    case claude
+    case unknown
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .codex: "Codex"
+        case .grokBot: "Grok Bot"
         case .claude: "Claude"
         case .grok: "Grok"
         case .unknown: "Agent"
