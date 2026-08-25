@@ -27,10 +27,12 @@ struct SidePulseMenuBarIcon: View {
         Image(nsImage: MenuBarIconRenderer.image(
             style: store.menuBarIconStyle,
             stateSymbol: store.aggregateState.symbol,
+            stateColorHex: store.selectedProfile.style(for: store.aggregateState).colorHex,
+            profile: store.selectedProfile,
             slots: store.scene.slots,
             ledCount: store.device.ledCount
         ))
-        .renderingMode(.template)
+        .renderingMode(.original)
         .frame(width: MenuBarIconRenderer.size.width, height: MenuBarIconRenderer.size.height)
         .accessibilityLabel("SidePulse, \(store.aggregateState.title), \(store.menuBarIconStyle.title)")
         .help("SidePulse · \(store.aggregateState.title)")
@@ -43,36 +45,48 @@ enum MenuBarIconRenderer {
     static func image(
         style: MenuBarIconStyle,
         stateSymbol: String,
+        stateColorHex: String,
+        profile: LightingProfile,
         slots: [AgentLEDSlot],
         ledCount: Int
     ) -> NSImage {
         let image = NSImage(size: size, flipped: false) { bounds in
             NSGraphicsContext.current?.shouldAntialias = true
             if style == .stateSymbol {
-                drawStateSymbol(stateSymbol, in: bounds)
+                drawStateSymbol(stateSymbol, colorHex: stateColorHex, in: bounds)
             } else {
-                drawDots(style: style, slots: slots, ledCount: ledCount, in: bounds)
+                drawDots(
+                    style: style,
+                    profile: profile,
+                    slots: slots,
+                    ledCount: ledCount,
+                    in: bounds
+                )
             }
             return true
         }
-        image.isTemplate = true
+        image.isTemplate = false
         return image
     }
 
-    private static func drawStateSymbol(_ name: String, in bounds: NSRect) {
+    private static func drawStateSymbol(_ name: String, colorHex: String, in bounds: NSRect) {
         guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: "SidePulse")?
             .withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
         else { return }
-        symbol.draw(in: NSRect(
+        let rect = NSRect(
             x: bounds.midX - 7,
             y: bounds.midY - 7,
             width: 14,
             height: 14
-        ))
+        )
+        symbol.draw(in: rect)
+        color(hex: colorHex).setFill()
+        rect.fill(using: .sourceAtop)
     }
 
     private static func drawDots(
         style: MenuBarIconStyle,
+        profile: LightingProfile,
         slots: [AgentLEDSlot],
         ledCount: Int,
         in bounds: NSRect
@@ -90,10 +104,15 @@ enum MenuBarIconRenderer {
             + CGFloat(max(0, groups.count - 1)) * geometry.spacing
 
         for (position, indices) in groups.enumerated() {
-            let active = indices.contains { index in
-                slots.first(where: { $0.index == index })?.agent != nil
+            let agents = indices.compactMap { index in
+                slots.first(where: { $0.index == index })?.agent
             }
-            NSColor.black.withAlphaComponent(active ? 1 : 0.55).setFill()
+            let representative = agents.min { left, right in
+                if left.state.priority != right.state.priority {
+                    return left.state.priority < right.state.priority
+                }
+                return left.updatedAt > right.updatedAt
+            }
 
             let rect: NSRect
             if geometry.vertical {
@@ -114,8 +133,29 @@ enum MenuBarIconRenderer {
                     height: geometry.diameter
                 )
             }
-            NSBezierPath(ovalIn: rect).fill()
+            let path = NSBezierPath(ovalIn: rect)
+            if let representative {
+                color(hex: profile.style(for: representative.state).colorHex).setFill()
+            } else {
+                NSColor.labelColor.withAlphaComponent(0.38).setFill()
+            }
+            path.fill()
+
+            NSColor.labelColor.withAlphaComponent(representative == nil ? 0.3 : 0.18).setStroke()
+            path.lineWidth = 0.35
+            path.stroke()
         }
+    }
+
+    private static func color(hex: String) -> NSColor {
+        let clean = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        let value = UInt64(clean, radix: 16) ?? 0xFFFFFF
+        return NSColor(
+            srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
+            green: CGFloat((value >> 8) & 0xFF) / 255,
+            blue: CGFloat(value & 0xFF) / 255,
+            alpha: 1
+        )
     }
 }
 
