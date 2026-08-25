@@ -63,6 +63,7 @@ final class CommandCenterStore {
     var batteryState: BatteryState?
     var batterySettings = AppPreferences.batteryIndicatorSettings()
     var agentDisplayMode = AppPreferences.agentDisplayMode()
+    var menuBarIconStyle = AppPreferences.menuBarIconStyle()
     var lidIsClosed: Bool?
     var lastLidTransitionAt: Date?
     var scene = CompiledScene(program: "", slots: [])
@@ -184,6 +185,12 @@ final class CommandCenterStore {
         AppPreferences.saveAgentDisplayMode(mode)
         resetAllocators()
         recompile()
+    }
+
+    func selectMenuBarIconStyle(_ style: MenuBarIconStyle) {
+        guard menuBarIconStyle != style else { return }
+        menuBarIconStyle = style
+        AppPreferences.saveMenuBarIconStyle(style)
     }
 
     func updateSelectedProfile(_ update: (inout LightingProfile) -> Void) {

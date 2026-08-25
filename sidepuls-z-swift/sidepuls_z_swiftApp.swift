@@ -14,9 +14,78 @@ struct SidePulseCommandCenterApp: App {
         MenuBarExtra {
             SidePulseMenuBarView(store: store)
         } label: {
-            Label("SidePulse", systemImage: store.aggregateState.symbol)
+            SidePulseMenuBarIcon(store: store)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+struct SidePulseMenuBarIcon: View {
+    @Bindable var store: CommandCenterStore
+
+    @ViewBuilder
+    var body: some View {
+        switch store.menuBarIconStyle {
+        case .horizontalEight:
+            HStack(spacing: 0.9) {
+                ForEach(Array(groups(for: .horizontalEight).enumerated()), id: \.offset) { _, group in
+                    dot(for: group, diameter: 2.35)
+                }
+            }
+            .frame(minWidth: 26, minHeight: 14)
+            .accessibilityLabel("SidePulse, \(store.aggregateState.title), eight horizontal dots")
+        case .verticalEight:
+            VStack(spacing: 0.32) {
+                ForEach(Array(groups(for: .verticalEight).enumerated()), id: \.offset) { _, group in
+                    dot(for: group, diameter: 1.45)
+                }
+            }
+            .frame(minWidth: 14, minHeight: 16)
+            .accessibilityLabel("SidePulse, \(store.aggregateState.title), eight vertical dots")
+        case .mirroredFour:
+            HStack(spacing: 1.25) {
+                ForEach(Array(groups(for: .mirroredFour).enumerated()), id: \.offset) { _, group in
+                    dot(for: group, diameter: 3.35)
+                }
+            }
+            .frame(minWidth: 19, minHeight: 14)
+            .accessibilityLabel("SidePulse, \(store.aggregateState.title), four mirrored dots")
+        case .stateSymbol:
+            Image(systemName: store.aggregateState.symbol)
+                .accessibilityLabel("SidePulse, \(store.aggregateState.title)")
+        }
+    }
+
+    private func groups(for style: MenuBarIconStyle) -> [[Int]] {
+        MenuBarDotLayout.sourceIndices(for: style, ledCount: store.device.ledCount)
+    }
+
+    private func dot(for indices: [Int], diameter: CGFloat) -> some View {
+        let slot = representativeSlot(for: indices)
+        let color = slot.flatMap(\.agent).map {
+            Color(hex: store.selectedProfile.style(for: $0.state).colorHex)
+        } ?? Color.primary.opacity(0.18)
+        return Circle()
+            .fill(color)
+            .overlay {
+                Circle().stroke(.primary.opacity(slot?.agent == nil ? 0.22 : 0.12), lineWidth: 0.35)
+            }
+            .frame(width: diameter, height: diameter)
+            .accessibilityHidden(true)
+    }
+
+    private func representativeSlot(for indices: [Int]) -> AgentLEDSlot? {
+        let candidates = indices.compactMap { index in
+            store.scene.slots.first(where: { $0.index == index })
+        }
+        let populated = candidates.filter { $0.agent != nil }
+        return populated.min { left, right in
+            guard let leftAgent = left.agent, let rightAgent = right.agent else { return false }
+            if leftAgent.state.priority != rightAgent.state.priority {
+                return leftAgent.state.priority < rightAgent.state.priority
+            }
+            return leftAgent.updatedAt > rightAgent.updatedAt
+        } ?? candidates.first
     }
 }
 
@@ -44,6 +113,24 @@ struct SidePulseMenuBarView: View {
                 }
             }
             .pickerStyle(.segmented)
+
+            HStack {
+                Label("Menu Bar Icon", systemImage: "menubar.rectangle")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Picker("Menu Bar Icon", selection: Binding(
+                    get: { store.menuBarIconStyle },
+                    set: { store.selectMenuBarIconStyle($0) }
+                )) {
+                    ForEach(MenuBarIconStyle.allCases) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 150)
+            }
 
             HStack(alignment: .top, spacing: 14) {
                 VStack(spacing: 7) {

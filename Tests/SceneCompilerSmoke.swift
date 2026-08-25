@@ -34,6 +34,13 @@ enum SceneCompilerSmoke {
         precondition(profile.style(for: .error).colorHex == "#FF0000")
         precondition(profile.style(for: .error).motion == .solid)
         precondition(!AgentState.allCases.contains(where: { $0.rawValue == "progress" }))
+        precondition(MenuBarDotLayout.sourceIndices(for: .horizontalEight) == (0..<8).map { [$0] })
+        precondition(MenuBarDotLayout.sourceIndices(for: .verticalEight) == (0..<8).reversed().map { [$0] })
+        precondition(MenuBarDotLayout.sourceIndices(for: .mirroredFour) == [
+            [0, 7], [1, 6], [2, 5], [3, 4],
+        ])
+        precondition(MenuBarDotLayout.sourceIndices(for: .mirroredFour, ledCount: 2) == [[0, 1]])
+        precondition(MenuBarDotLayout.sourceIndices(for: .stateSymbol).isEmpty)
 
         assertSimpleDisplayPolicy(now: now, compiler: compiler)
 

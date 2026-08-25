@@ -285,15 +285,33 @@ struct SignalModeControl: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Picker("Signal Mode", selection: Binding(
-                get: { store.agentDisplayMode },
-                set: { store.selectAgentDisplayMode($0) }
-            )) {
-                ForEach(AgentDisplayMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
+            VStack(alignment: .trailing, spacing: 8) {
+                Picker("Signal Mode", selection: Binding(
+                    get: { store.agentDisplayMode },
+                    set: { store.selectAgentDisplayMode($0) }
+                )) {
+                    ForEach(AgentDisplayMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                HStack(spacing: 8) {
+                    Text("Menu bar icon")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("Menu Bar Icon", selection: Binding(
+                        get: { store.menuBarIconStyle },
+                        set: { store.selectMenuBarIconStyle($0) }
+                    )) {
+                        ForEach(MenuBarIconStyle.allCases) { style in
+                            Text(style.title).tag(style)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
                 }
             }
-            .pickerStyle(.segmented)
             .frame(width: 240)
         }
         .padding(18)

@@ -125,6 +125,59 @@ enum AgentDisplayMode: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum MenuBarIconStyle: String, Codable, CaseIterable, Identifiable, Sendable {
+    case horizontalEight
+    case verticalEight
+    case mirroredFour
+    case stateSymbol
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .horizontalEight: "8 Horizontal"
+        case .verticalEight: "8 Vertical"
+        case .mirroredFour: "Mirrored 4"
+        case .stateSymbol: "State Symbol"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .horizontalEight:
+            "Show all eight physical LED positions in one compact row."
+        case .verticalEight:
+            "Stack LED 8 at the top through LED 1 at the bottom."
+        case .mirroredFour:
+            "Use four dots, each summarizing an opposing LED pair from the array edges inward."
+        case .stateSymbol:
+            "Use the standard symbol for the current highest-priority state."
+        }
+    }
+}
+
+enum MenuBarDotLayout {
+    static func sourceIndices(
+        for style: MenuBarIconStyle,
+        ledCount: Int = 8
+    ) -> [[Int]] {
+        let count = max(1, min(8, ledCount))
+        switch style {
+        case .horizontalEight:
+            return (0..<count).map { [$0] }
+        case .verticalEight:
+            return (0..<count).reversed().map { [$0] }
+        case .mirroredFour:
+            return (0..<(count + 1) / 2).map { index in
+                let opposite = count - 1 - index
+                return index == opposite ? [index] : [index, opposite]
+            }
+        case .stateSymbol:
+            return []
+        }
+    }
+}
+
 struct AgentSession: Identifiable, Codable, Hashable, Sendable {
     let id: String
     var provider: AgentProvider
