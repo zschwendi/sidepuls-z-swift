@@ -239,12 +239,62 @@ enum SceneCompilerSmoke {
         precondition(cappedDot.placementsTopToBottom.map(\.ledIndices.count) == [1, 1])
         precondition(cappedDot.placementsTopToBottom.map(\.agent.id) == ["agent:0", "agent:1"])
 
+        precondition(SidePulseDeviceKind.detected(fromVolumeName: "SidePulse") == .pro)
+        precondition(SidePulseDeviceKind.detected(fromVolumeName: "SidePulse Pro") == .pro)
+        precondition(SidePulseDeviceKind.detected(fromVolumeName: "PulseDot") == .dot)
+        precondition(SidePulseDeviceKind.detected(fromVolumeName: "SidePulse Dot") == .dot)
+        precondition(SidePulseDeviceKind.detected(fromVolumeName: "Macintosh HD") == nil)
+
+        var proMirrorAllocator = StableSlotAllocator()
+        var dotMirrorAllocator = StableSlotAllocator()
+        let mirrorAgent = session("mirror:0", updatedAt: now)
+        let mirroredPro = compiler.compile(
+            profile: profile,
+            agents: [mirrorAgent],
+            allocator: &proMirrorAllocator,
+            ledCount: 8,
+            now: now
+        )
+        let mirroredDot = compiler.compile(
+            profile: profile,
+            agents: [mirrorAgent],
+            allocator: &dotMirrorAllocator,
+            ledCount: 2,
+            now: now
+        )
+        precondition(mirroredPro.program.contains("0:#6A1259 600ms pulse"))
+        precondition(mirroredPro.program.contains("7:#6A1259 600ms pulse 430ms"))
+        precondition(mirroredDot.program.contains("0:#6A1259 600ms pulse"), "Bottom Dot must start with Pro LED 1")
+        precondition(mirroredDot.program.contains("1:#6A1259 600ms pulse 430ms"), "Top Dot must finish with Pro LED 8")
+
+        proMirrorAllocator.reset()
+        dotMirrorAllocator.reset()
+        let mirroredAgents = makeAgents(2, now: now)
+        let splitPro = compiler.compile(
+            profile: profile,
+            agents: mirroredAgents,
+            allocator: &proMirrorAllocator,
+            ledCount: 8,
+            now: now
+        )
+        let splitDot = compiler.compile(
+            profile: profile,
+            agents: mirroredAgents,
+            allocator: &dotMirrorAllocator,
+            ledCount: 2,
+            now: now
+        )
+        precondition(splitPro.placementsTopToBottom.map(\.ledIndices.count) == [4, 4])
+        precondition(splitDot.placementsTopToBottom.map(\.ledIndices.count) == [1, 1])
+        precondition(splitDot.slots[0].agent?.id == splitPro.slots[0].agent?.id, "Bottom Dot must mirror the lower four Pro LEDs")
+        precondition(splitDot.slots[1].agent?.id == splitPro.slots[7].agent?.id, "Top Dot must mirror the upper four Pro LEDs")
+
         precondition(capped.program.utf8.count <= 512, "Firmware program exceeds the device limit")
         precondition(capped.program.contains("repeat"), "Animated active scene must repeat")
         if ProcessInfo.processInfo.environment["SIDEPULSE_DUMP_PROGRAMS"] == "1" {
             dumpFirmwarePrograms(now: now, compiler: compiler)
         }
-        print("Scene compiler smoke passed: battery lid gauge, low-battery alert, motion geometry, color modes, adaptive stable layouts")
+        print("Scene compiler smoke passed: dual-device discovery, mirrored Dot timing, battery scenes, motion geometry, color modes, adaptive stable layouts")
     }
 
     private static func dumpFirmwarePrograms(now: Date, compiler: LightingSceneCompiler) {

@@ -52,7 +52,14 @@ final class CommandCenterStore {
                 lastEventAt: nil
             )
         }
-    var device = DeviceState()
+    var proDevice = SidePulseDeviceKind.pro.disconnectedState
+    var dotDevice = SidePulseDeviceKind.dot.disconnectedState
+    var device: DeviceState {
+        if proDevice.connected { return proDevice }
+        if dotDevice.connected { return dotDevice }
+        return proDevice
+    }
+    var hardwareDevices: [DeviceState] { [proDevice, dotDevice] }
     var batteryState: BatteryState?
     var lidIsClosed: Bool?
     var lastLidTransitionAt: Date?
@@ -69,10 +76,14 @@ final class CommandCenterStore {
     }
     var runtimeMessage = "Preview data — native event runtime not connected yet"
 
-    private var allocator = StableSlotAllocator()
+    private var proAllocator = StableSlotAllocator()
+    private var dotAllocator = StableSlotAllocator()
     private let compiler = LightingSceneCompiler()
+    @ObservationIgnored private var proScene = CompiledScene(program: "off", slots: [])
+    @ObservationIgnored private var dotScene = CompiledScene(program: "off", slots: [])
     @ObservationIgnored private var runtime: NativeAgentRuntime?
-    @ObservationIgnored private var hardware: SidePulseHardwareController?
+    @ObservationIgnored private var proHardware: SidePulseHardwareController?
+    @ObservationIgnored private var dotHardware: SidePulseHardwareController?
     @ObservationIgnored private var lidMonitor: LidStateMonitor?
     @ObservationIgnored private var batteryMonitor: BatteryStateMonitor?
     @ObservationIgnored private var lastLowBatteryAlertAt: Date?
@@ -153,7 +164,7 @@ final class CommandCenterStore {
     func selectProfile(_ id: UUID) {
         guard profiles.contains(where: { $0.id == id }) else { return }
         selectedProfileID = id
-        allocator.reset()
+        resetAllocators()
         recompile()
         persistProfiles()
     }
@@ -162,7 +173,7 @@ final class CommandCenterStore {
         guard let index = profiles.firstIndex(where: { $0.id == selectedProfileID }) else { return }
         let previousStrategy = profiles[index].strategy
         update(&profiles[index])
-        if profiles[index].strategy != previousStrategy { allocator.reset() }
+        if profiles[index].strategy != previousStrategy { resetAllocators() }
         recompile()
         persistProfiles()
     }
@@ -203,7 +214,7 @@ final class CommandCenterStore {
         else { return }
         profiles.remove(at: index)
         selectedProfileID = defaultProfileID ?? profiles[0].id
-        allocator.reset()
+        resetAllocators()
         recompile()
         persistProfiles()
         ProfileFocusIntegration.profileLibraryDidChange()
@@ -246,7 +257,7 @@ final class CommandCenterStore {
                 }
             }
             selectedProfileID = imported[0].id
-            allocator.reset()
+            resetAllocators()
             recompile()
             persistProfiles()
             ProfileFocusIntegration.profileLibraryDidChange()
@@ -285,12 +296,19 @@ final class CommandCenterStore {
     }
 
     func recompile() {
-        scene = compiler.compile(
+        proScene = compiler.compile(
             profile: selectedProfile,
             agents: agents,
-            allocator: &allocator,
-            ledCount: device.ledCount
+            allocator: &proAllocator,
+            ledCount: SidePulseDeviceKind.pro.ledCount
         )
+        dotScene = compiler.compile(
+            profile: selectedProfile,
+            agents: agents,
+            allocator: &dotAllocator,
+            ledCount: SidePulseDeviceKind.dot.ledCount
+        )
+        scene = proDevice.connected || !dotDevice.connected ? proScene : dotScene
         syncHardwareOutput()
     }
 
@@ -308,14 +326,22 @@ final class CommandCenterStore {
             updatedAt: .now,
             message: nil
         )
-        var previewAllocator = StableSlotAllocator()
-        let preview = compiler.compile(
+        var proPreviewAllocator = StableSlotAllocator()
+        let proPreview = compiler.compile(
             profile: selectedProfile,
             agents: [previewAgent],
-            allocator: &previewAllocator,
-            ledCount: device.ledCount
+            allocator: &proPreviewAllocator,
+            ledCount: SidePulseDeviceKind.pro.ledCount
         )
-        hardware?.preview(program: preview.program)
+        var dotPreviewAllocator = StableSlotAllocator()
+        let dotPreview = compiler.compile(
+            profile: selectedProfile,
+            agents: [previewAgent],
+            allocator: &dotPreviewAllocator,
+            ledCount: SidePulseDeviceKind.dot.ledCount
+        )
+        proHardware?.preview(program: proPreview.program)
+        dotHardware?.preview(program: dotPreview.program)
     }
 
     private func persistProfiles() {
@@ -374,7 +400,7 @@ final class CommandCenterStore {
             : saved.profiles[0].id
         guard selectedProfileID != targetID else { return }
         selectedProfileID = targetID
-        allocator.reset()
+        resetAllocators()
         recompile()
     }
 
@@ -395,22 +421,26 @@ final class CommandCenterStore {
               selectedProfileID != targetID
         else { return }
         selectedProfileID = targetID
-        allocator.reset()
+        resetAllocators()
         recompile()
         persistProfiles()
     }
 
     private func startNativeRuntime() {
-        let hardware = SidePulseHardwareController { [weak self] device in
+        let proHardware = SidePulseHardwareController(kind: .pro) { [weak self] device in
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                let ledCountChanged = self.device.ledCount != device.ledCount
-                self.device = device
-                if ledCountChanged { self.recompile() }
+                self?.handleDeviceUpdate(device, kind: .pro)
             }
         }
-        self.hardware = hardware
-        hardware.start()
+        let dotHardware = SidePulseHardwareController(kind: .dot) { [weak self] device in
+            Task { @MainActor [weak self] in
+                self?.handleDeviceUpdate(device, kind: .dot)
+            }
+        }
+        self.proHardware = proHardware
+        self.dotHardware = dotHardware
+        proHardware.start()
+        dotHardware.start()
 
         let batteryMonitor = BatteryStateMonitor { [weak self] state in
             Task { @MainActor [weak self] in
@@ -426,13 +456,21 @@ final class CommandCenterStore {
                 self.lidIsClosed = isClosed
                 guard isTransition else { return }
                 self.lastLidTransitionAt = .now
-                let transition = SystemLightingScenes.batteryGauge(
+                let proTransition = SystemLightingScenes.batteryGauge(
                     chargeFraction: self.batteryState?.chargeFraction ?? 1,
-                    ledCount: self.device.ledCount
+                    ledCount: SidePulseDeviceKind.pro.ledCount
                 )
-                self.hardware?.preview(
-                    program: transition.program,
-                    duration: transition.duration
+                let dotTransition = SystemLightingScenes.batteryGauge(
+                    chargeFraction: self.batteryState?.chargeFraction ?? 1,
+                    ledCount: SidePulseDeviceKind.dot.ledCount
+                )
+                self.proHardware?.preview(
+                    program: proTransition.program,
+                    duration: proTransition.duration
+                )
+                self.dotHardware?.preview(
+                    program: dotTransition.program,
+                    duration: dotTransition.duration
                 )
             }
         }
@@ -443,7 +481,7 @@ final class CommandCenterStore {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if self.isShowingPreviewData {
-                    self.allocator.reset()
+                    self.resetAllocators()
                     self.isShowingPreviewData = false
                 }
                 self.agents = agents
@@ -456,6 +494,17 @@ final class CommandCenterStore {
         runtime.start()
     }
 
+    private func handleDeviceUpdate(_ device: DeviceState, kind: SidePulseDeviceKind) {
+        let previous = kind == .pro ? proDevice : dotDevice
+        let topologyChanged = previous.connected != device.connected || previous.path != device.path
+        if kind == .pro {
+            proDevice = device
+        } else {
+            dotDevice = device
+        }
+        if topologyChanged { recompile() }
+    }
+
     private func handleBatteryUpdate(_ state: BatteryState?) {
         if batteryState != state { batteryState = state }
         guard let state, state.isLowAndDischarging else {
@@ -466,18 +515,25 @@ final class CommandCenterStore {
         let now = Date.now
         guard lastLowBatteryAlertAt.map({ now.timeIntervalSince($0) >= 15 }) ?? true else { return }
         lastLowBatteryAlertAt = now
-        let alert = SystemLightingScenes.lowBatteryAlert(ledCount: device.ledCount)
-        hardware?.preview(program: alert.program, duration: alert.duration)
+        let proAlert = SystemLightingScenes.lowBatteryAlert(ledCount: SidePulseDeviceKind.pro.ledCount)
+        let dotAlert = SystemLightingScenes.lowBatteryAlert(ledCount: SidePulseDeviceKind.dot.ledCount)
+        proHardware?.preview(program: proAlert.program, duration: proAlert.duration)
+        dotHardware?.preview(program: dotAlert.program, duration: dotAlert.duration)
     }
 
     private func syncHardwareOutput() {
-        guard let hardware else { return }
-        let currentStates = Dictionary(uniqueKeysWithValues: scene.placementsTopToBottom.map {
+        let currentStates = Dictionary(uniqueKeysWithValues: proScene.placementsTopToBottom.map {
             ($0.agent.id, $0.agent.state)
         })
         let timing = hardwareTiming(from: lastOutputStates, to: currentStates)
-        hardware.update(enabled: liveOutputEnabled, program: scene.program, timing: timing)
+        proHardware?.update(enabled: liveOutputEnabled, program: proScene.program, timing: timing)
+        dotHardware?.update(enabled: liveOutputEnabled, program: dotScene.program, timing: timing)
         lastOutputStates = currentStates
+    }
+
+    private func resetAllocators() {
+        proAllocator.reset()
+        dotAllocator.reset()
     }
 
     private func hardwareTiming(

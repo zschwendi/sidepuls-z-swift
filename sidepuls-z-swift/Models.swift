@@ -430,3 +430,39 @@ struct DeviceState: Equatable, Sendable {
     var lastWrite: Date?
     var lastError: String?
 }
+
+enum SidePulseDeviceKind: String, CaseIterable, Sendable {
+    case pro
+    case dot
+
+    var name: String {
+        switch self {
+        case .pro: "SidePulse Pro"
+        case .dot: "SidePulse Dot"
+        }
+    }
+
+    var ledCount: Int {
+        switch self {
+        case .pro: 8
+        case .dot: 2
+        }
+    }
+
+    var fallbackPath: String {
+        switch self {
+        case .pro: "/Volumes/SidePulse/LEDS.LED"
+        case .dot: "/Volumes/PulseDot/LEDS.LED"
+        }
+    }
+
+    var disconnectedState: DeviceState {
+        DeviceState(name: name, path: fallbackPath, ledCount: ledCount)
+    }
+
+    static func detected(fromVolumeName name: String) -> SidePulseDeviceKind? {
+        let normalized = name.lowercased().filter(\.isLetter)
+        guard normalized.contains("pulse") else { return nil }
+        return normalized.contains("dot") ? .dot : .pro
+    }
+}

@@ -1089,34 +1089,14 @@ struct HardwareView: View {
     @Bindable var store: CommandCenterStore
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Hardware").font(.largeTitle.bold())
-            HStack(spacing: 16) {
-                Image(systemName: "externaldrive.fill.badge.checkmark")
-                    .font(.system(size: 34))
-                    .foregroundStyle(store.device.connected ? .green : .secondary)
-                VStack(alignment: .leading) {
-                    Text(store.device.name).font(.title3.bold())
-                    Text(store.device.connected ? "Connected" : "Waiting for device runtime")
-                        .foregroundStyle(.secondary)
-                    if store.device.connected {
-                        Text(store.device.path)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.tertiary)
-                            .textSelection(.enabled)
-                    }
-                }
+            HStack {
+                Text("Hardware").font(.largeTitle.bold())
                 Spacer()
                 Toggle("Live output", isOn: $store.liveOutputEnabled).toggleStyle(.switch)
             }
-            .padding(22)
-            .glassEffect(.regular, in: .rect(cornerRadius: 24))
 
-            if let error = store.device.lastError {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-            } else if let lastWrite = store.device.lastWrite {
-                Label("Last write \(lastWrite.formatted(date: .omitted, time: .standard))", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+            ForEach(store.hardwareDevices, id: \.path) { device in
+                HardwareDeviceCard(device: device)
             }
 
             Label("Live Output is remembered between launches.", systemImage: "memorychip")
@@ -1132,6 +1112,54 @@ struct HardwareView: View {
                 .background(.black.opacity(0.45), in: .rect(cornerRadius: 16))
             Spacer()
         }
+    }
+}
+
+struct HardwareDeviceCard: View {
+    let device: DeviceState
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: device.connected ? "externaldrive.fill.badge.checkmark" : "externaldrive.fill")
+                .font(.system(size: 34))
+                .foregroundStyle(device.connected ? .green : .secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 9) {
+                    Text(device.name).font(.title3.bold())
+                    Text(device.ledCount == 8 ? "8-LED PRIMARY" : "2-LED MIRROR")
+                        .font(.caption2.bold())
+                        .foregroundStyle(device.connected ? .primary : .secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.white.opacity(device.connected ? 0.12 : 0.06), in: .capsule)
+                }
+                Text(device.connected ? "Connected" : "Waiting for device")
+                    .foregroundStyle(.secondary)
+                Text(device.ledCount == 8
+                    ? "Eight-LED scene stays unchanged as the primary output."
+                    : "Bottom and top dots stay phase-locked to the Pro sweep.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if device.connected {
+                    Text(device.path)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .textSelection(.enabled)
+                }
+                if let error = device.lastError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else if let lastWrite = device.lastWrite {
+                    Label("Last write \(lastWrite.formatted(date: .omitted, time: .standard))", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+            }
+            Spacer()
+        }
+        .padding(22)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
     }
 }
 

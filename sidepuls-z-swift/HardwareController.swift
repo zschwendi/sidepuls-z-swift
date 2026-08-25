@@ -10,10 +10,11 @@ enum HardwareUpdateTiming: Equatable, Sendable {
 final class SidePulseHardwareController: @unchecked Sendable {
     typealias UpdateHandler = @Sendable (DeviceState) -> Void
 
-    private let queue = DispatchQueue(label: "io.sidepulse.hardware-controller")
+    private let queue: DispatchQueue
+    private let kind: SidePulseDeviceKind
     private let onUpdate: UpdateHandler
     private var timer: DispatchSourceTimer?
-    private var state = DeviceState()
+    private var state: DeviceState
     private var outputEnabled = false
     private var requestedProgram = "off"
     private var lastWrittenProgram: String?
@@ -24,8 +25,11 @@ final class SidePulseHardwareController: @unchecked Sendable {
     private var deferredWriteDeadline: Date?
     private let outputDisabledByEnvironment: Bool
 
-    init(onUpdate: @escaping UpdateHandler) {
+    init(kind: SidePulseDeviceKind, onUpdate: @escaping UpdateHandler) {
+        self.kind = kind
+        queue = DispatchQueue(label: "io.sidepulse.hardware-controller.\(kind.rawValue)")
         self.onUpdate = onUpdate
+        state = kind.disconnectedState
         outputDisabledByEnvironment = ["1", "true", "yes"].contains(
             ProcessInfo.processInfo.environment["SIDEPULSE_DISABLE_DEVICE_OUTPUT"]?.lowercased() ?? ""
         )
@@ -105,6 +109,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
             cancelDeferredWriteLocked()
             previewGeneration += 1
             let generation = previewGeneration
+            let previewPath = state.path
             activePreviewGeneration = generation
             do {
                 try writeLocked(program, remember: false)
@@ -116,6 +121,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
             queue.asyncAfter(deadline: .now() + max(0.5, duration)) { [weak self] in
                 guard let self, activePreviewGeneration == generation else { return }
                 activePreviewGeneration = nil
+                guard state.connected, state.path == previewPath else { return }
                 let restore = outputEnabled ? requestedProgram : "off"
                 do {
                     try writeLocked(restore, remember: outputEnabled)
@@ -127,12 +133,19 @@ final class SidePulseHardwareController: @unchecked Sendable {
     }
 
     private func refreshDeviceLocked() {
-        let discovered = Self.discoverDevice()
-        var next = discovered ?? DeviceState()
+        let discovered = Self.discoverDevice(kind: kind)
+        var next = discovered ?? kind.disconnectedState
         if next.connected, next.path == state.path {
             next.activeProgram = state.activeProgram
             next.lastWrite = state.lastWrite
             next.lastError = state.lastError
+        }
+        let topologyChanged = next.connected != state.connected || next.path != state.path
+        if topologyChanged {
+            cancelPreviewLocked()
+            cancelDeferredWriteLocked()
+            lastWrittenProgram = nil
+            lastProgramStartedAt = nil
         }
         let changed = next != state
         state = next
@@ -219,7 +232,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
         onUpdate(state)
     }
 
-    private static func discoverDevice() -> DeviceState? {
+    private static func discoverDevice(kind: SidePulseDeviceKind) -> DeviceState? {
         let root = URL(fileURLWithPath: "/Volumes", isDirectory: true)
         guard let volumes = try? FileManager.default.contentsOfDirectory(
             at: root,
@@ -229,22 +242,17 @@ final class SidePulseHardwareController: @unchecked Sendable {
 
         let candidates = volumes.compactMap { volume -> DeviceState? in
             guard (try? volume.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
-            let normalized = volume.lastPathComponent.lowercased().filter(\.isLetter)
-            let isPro = normalized.contains("sidepulsepro")
-            let isDot = normalized.contains("sidepulsedot")
+            guard SidePulseDeviceKind.detected(fromVolumeName: volume.lastPathComponent) == kind else { return nil }
             let target = volume.appending(path: "LEDS.LED")
-            guard isPro || isDot || FileManager.default.fileExists(atPath: target.path) else { return nil }
+            guard FileManager.default.fileExists(atPath: target.path) else { return nil }
             return DeviceState(
-                name: isDot ? "SidePulse Dot" : "SidePulse Pro",
+                name: kind.name,
                 path: target.path,
-                ledCount: isDot ? 2 : 8,
+                ledCount: kind.ledCount,
                 connected: true
             )
         }
-        return candidates.sorted {
-            if $0.ledCount != $1.ledCount { return $0.ledCount > $1.ledCount }
-            return $0.path.localizedStandardCompare($1.path) == .orderedAscending
-        }.first
+        return candidates.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }.first
     }
 }
 
