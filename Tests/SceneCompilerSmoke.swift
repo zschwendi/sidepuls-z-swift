@@ -15,18 +15,23 @@ enum SceneCompilerSmoke {
         )
         precondition(empty.program == "off", "No agents must turn the array off")
 
-        let profile = LightingProfile.commandCenter
+        let profile = LightingProfile.factoryDefault
+        precondition(profile.style(for: .idle).motion == .off)
+        precondition(profile.style(for: .idle).intensity == 0)
         precondition(profile.style(for: .working).colorHex == "#FF2BD6")
         precondition(profile.style(for: .working).motion == .breathe)
-        precondition(profile.style(for: .toolRunning).colorHex == "#00D5C8")
+        precondition(profile.style(for: .working).cycleSeconds == 1.0340260549065254)
+        precondition(profile.style(for: .working).intensity == 0.41507945559610704)
+        precondition(profile.style(for: .toolRunning).colorHex == "#0018FF")
         precondition(profile.style(for: .toolRunning).motion == profile.style(for: .working).motion)
         precondition(profile.style(for: .toolRunning).cycleSeconds == profile.style(for: .working).cycleSeconds)
         precondition(profile.style(for: .toolRunning).intensity == profile.style(for: .working).intensity)
         precondition(profile.style(for: .waiting).colorHex == "#FFD60A")
-        precondition(profile.style(for: .waiting).motion == .solid)
-        precondition(profile.style(for: .completed).colorHex == "#30D158")
+        precondition(profile.style(for: .waiting).motion == .flash)
+        precondition(profile.style(for: .waiting).cycleSeconds == 0.7369829683698299)
+        precondition(profile.style(for: .completed).colorHex == "#00D300")
         precondition(profile.style(for: .completed).motion == .solid)
-        precondition(profile.style(for: .error).colorHex == "#FF3B30")
+        precondition(profile.style(for: .error).colorHex == "#FF0000")
         precondition(profile.style(for: .error).motion == .solid)
         precondition(!AgentState.allCases.contains(where: { $0.rawValue == "progress" }))
 
@@ -38,8 +43,8 @@ enum SceneCompilerSmoke {
             now: now
         )
         precondition(breathe.program.contains("\noff\n"), "Animated scenes must seed a dark base")
-        precondition(breathe.program.contains("0:#D123AF 1.51s pulse"), "Thinking breathe must begin at LED 1")
-        precondition(breathe.program.contains("7:#D123AF 1.51s pulse 1.09s"), "Thinking breathe must travel through LED 8")
+        precondition(breathe.program.contains("0:#6A1259 600ms pulse"), "Thinking breathe must begin at LED 1")
+        precondition(breathe.program.contains("7:#6A1259 600ms pulse 430ms"), "Thinking breathe must travel through LED 8")
         precondition(breathe.program.contains("repeat"))
 
         assertMotionPrograms(now: now, compiler: compiler)
@@ -123,7 +128,7 @@ enum SceneCompilerSmoke {
         precondition(linkedTool.motion == .chase)
         precondition(linkedTool.cycleSeconds == 3.4)
         precondition(linkedTool.intensity == 0.64)
-        precondition(linkedTool.colorHex == "#00D5C8", "Tool Running must retain its own palette")
+        precondition(linkedTool.colorHex == "#0018FF", "Tool Running must retain its own palette")
         precondition(AgentStateTransitionPolicy.defersToAnimationBoundary(
             from: ["agent": .working],
             to: ["agent": .toolRunning]

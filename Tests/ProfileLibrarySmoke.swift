@@ -3,6 +3,42 @@ import Foundation
 @main
 enum ProfileLibrarySmoke {
     static func main() throws {
+        let factory = LightingProfile.factoryDefault
+        precondition(factory.name == "Default")
+        precondition(factory.strategy == .adaptiveOccupancy)
+        precondition(factory.deviceBrightness == 0.72)
+        precondition(factory.styles == [
+            .init(state: .idle, colorHex: "#EEF9E0", secondaryColorHex: "#7C3AED", motion: .off, cycleSeconds: 8, intensity: 0),
+            .init(state: .working, colorHex: "#FF2BD6", secondaryColorHex: "#DBD1EE", motion: .breathe, cycleSeconds: 1.0340260549065254, intensity: 0.41507945559610704),
+            .init(state: .toolRunning, colorHex: "#0018FF", secondaryColorHex: "#7C3AED", motion: .breathe, cycleSeconds: 1.0340260549065254, intensity: 0.41507945559610704),
+            .init(state: .waiting, colorHex: "#FFD60A", secondaryColorHex: "#7C3AED", motion: .flash, cycleSeconds: 0.7369829683698299, intensity: 0.88),
+            .init(state: .error, colorHex: "#FF0000", secondaryColorHex: "#7C3AED", motion: .solid, cycleSeconds: 1, intensity: 0.95),
+            .init(state: .completed, colorHex: "#00D300", secondaryColorHex: "#7C3AED", motion: .solid, cycleSeconds: 1, intensity: 0.85),
+        ])
+
+        let protectedSuiteName = "sidepulse.profile-protected-smoke.\(UUID().uuidString)"
+        let protectedDefaults = UserDefaults(suiteName: protectedSuiteName)!
+        defer { protectedDefaults.removePersistentDomain(forName: protectedSuiteName) }
+        var userOwned = factory
+        userOwned.id = UUID()
+        userOwned.name = "Never Replace Me"
+        userOwned.deviceBrightness = 0.317
+        var userThinking = userOwned.style(for: .working)
+        userThinking.colorHex = "#123456"
+        userOwned.updateStyle(userThinking)
+        let currentLibrary = SavedProfileLibrary(
+            schemaVersion: 9,
+            profiles: [userOwned],
+            selectedProfileID: userOwned.id
+        )
+        protectedDefaults.set(
+            try JSONEncoder().encode(currentLibrary),
+            forKey: "sidepulse.profile-library.v1"
+        )
+        let protectedLibrary = try require(ProfileLibrary.load(from: protectedDefaults))
+        precondition(protectedLibrary.profiles == [userOwned])
+        precondition(protectedLibrary.selectedProfileID == userOwned.id)
+
         let suiteName = "sidepulse.profile-smoke.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -90,7 +126,7 @@ enum ProfileLibrarySmoke {
             // Expected.
         }
 
-        print("Profile library smoke passed: current settings become Default, presets are removed, and JSON round-trips")
+        print("Profile library smoke passed: live settings are factory defaults, saved profiles win, and JSON round-trips")
     }
 
     private static func require<T>(_ value: T?) throws -> T {

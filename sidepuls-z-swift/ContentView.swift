@@ -798,7 +798,7 @@ struct StyleInspectorView: View {
             Spacer()
             HStack {
                 Button("Reset State", systemImage: "arrow.counterclockwise") {
-                    store.updateStyle(LightingProfile.commandCenter.style(for: style.state))
+                    store.updateStyle(LightingProfile.factoryDefault.style(for: style.state))
                 }
                 Spacer()
                 Button("Preview on SidePulse", systemImage: "play.fill") {

@@ -35,10 +35,12 @@ enum ProfileLibrary {
     static func load(from defaults: UserDefaults = .standard) -> SavedProfileLibrary? {
         guard let data = defaults.data(forKey: storageKey) else { return nil }
         guard var library = try? JSONDecoder().decode(SavedProfileLibrary.self, from: data) else { return nil }
+        // Saved profiles win over the compiled factory baseline. Factory changes
+        // must never mutate a current-schema library behind the user's back.
         guard library.schemaVersion < 9 else { return library }
 
         let builtIns = [
-            LightingProfile.commandCenter,
+            LightingProfile.factoryDefault,
             LightingProfile.quietNight,
             LightingProfile.highSignal,
         ]
@@ -84,7 +86,7 @@ enum ProfileLibrary {
         if library.schemaVersion < 9 {
             var current = library.profiles.first(where: { $0.id == library.selectedProfileID })
                 ?? library.profiles.first
-                ?? .commandCenter
+                ?? .factoryDefault
             current.name = "Default"
             library.profiles = [current]
             library.selectedProfileID = current.id

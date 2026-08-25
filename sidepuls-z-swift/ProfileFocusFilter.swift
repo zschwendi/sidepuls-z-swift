@@ -45,7 +45,7 @@ struct SidePulseProfileQuery: EntityQuery {
     }
 
     private func profiles() -> [LightingProfile] {
-        ProfileLibrary.load()?.profiles ?? [.commandCenter]
+        ProfileLibrary.load()?.profiles ?? [.factoryDefault]
     }
 }
 
@@ -89,7 +89,7 @@ struct SetSidePulseProfileFocusFilter: SetFocusFilterIntent {
         for context: FocusFilterSuggestionContext
     ) async -> [SetSidePulseProfileFocusFilter] {
         let profiles = await MainActor.run {
-            ProfileLibrary.load()?.profiles ?? [.commandCenter]
+            ProfileLibrary.load()?.profiles ?? [.factoryDefault]
         }
         return profiles.map {
             SetSidePulseProfileFocusFilter(profile: SidePulseProfileEntity(profile: $0))

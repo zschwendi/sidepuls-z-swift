@@ -326,21 +326,26 @@ struct LightingProfile: Identifiable, Codable, Hashable, Sendable {
 }
 
 extension LightingProfile {
-    static let commandCenter = LightingProfile(
+    /// The factory baseline used only for a new library or an explicit state reset.
+    /// A profile already saved by the user is always authoritative.
+    static let factoryDefault = LightingProfile(
         id: UUID(uuidString: "1B91F090-339B-4C53-8DD2-74FF1F1E0611")!,
         name: "Default",
         symbol: "command",
         strategy: .adaptiveOccupancy,
         deviceBrightness: 0.72,
         styles: [
-            .init(state: .idle, colorHex: "#0A1520", secondaryColorHex: "#10304A", motion: .breathe, cycleSeconds: 8, intensity: 0.28),
-            .init(state: .working, colorHex: "#FF2BD6", secondaryColorHex: "#7C3AED", motion: .breathe, cycleSeconds: 2.6, intensity: 0.82),
-            .init(state: .toolRunning, colorHex: "#00D5C8", secondaryColorHex: "#007AFF", motion: .breathe, cycleSeconds: 2.6, intensity: 0.82),
-            .init(state: .waiting, colorHex: "#FFD60A", secondaryColorHex: "#FF9F0A", motion: .solid, cycleSeconds: 1, intensity: 0.88),
-            .init(state: .error, colorHex: "#FF3B30", secondaryColorHex: "#FF453A", motion: .solid, cycleSeconds: 1, intensity: 0.95),
-            .init(state: .completed, colorHex: "#30D158", secondaryColorHex: "#00C7BE", motion: .solid, cycleSeconds: 1, intensity: 0.85),
+            .init(state: .idle, colorHex: "#EEF9E0", secondaryColorHex: "#7C3AED", motion: .off, cycleSeconds: 8, intensity: 0),
+            .init(state: .working, colorHex: "#FF2BD6", secondaryColorHex: "#DBD1EE", motion: .breathe, cycleSeconds: 1.0340260549065254, intensity: 0.41507945559610704),
+            .init(state: .toolRunning, colorHex: "#0018FF", secondaryColorHex: "#7C3AED", motion: .breathe, cycleSeconds: 1.0340260549065254, intensity: 0.41507945559610704),
+            .init(state: .waiting, colorHex: "#FFD60A", secondaryColorHex: "#7C3AED", motion: .flash, cycleSeconds: 0.7369829683698299, intensity: 0.88),
+            .init(state: .error, colorHex: "#FF0000", secondaryColorHex: "#7C3AED", motion: .solid, cycleSeconds: 1, intensity: 0.95),
+            .init(state: .completed, colorHex: "#00D300", secondaryColorHex: "#7C3AED", motion: .solid, cycleSeconds: 1, intensity: 0.85),
         ]
     )
+
+    // Retains the original source name for pre-schema-9 migration compatibility.
+    static let commandCenter = factoryDefault
 
     static let quietNight = LightingProfile(
         id: UUID(uuidString: "7159FD95-BB00-483D-BA83-A619787972B4")!,

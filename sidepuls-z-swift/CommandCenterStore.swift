@@ -36,8 +36,8 @@ enum CommandCenterSection: String, CaseIterable, Identifiable {
 @Observable
 final class CommandCenterStore {
     var selectedSection: CommandCenterSection = .overview
-    var profiles: [LightingProfile] = [.commandCenter]
-    var selectedProfileID = LightingProfile.commandCenter.id
+    var profiles: [LightingProfile] = [.factoryDefault]
+    var selectedProfileID = LightingProfile.factoryDefault.id
     var selectedState: AgentState = .working
     var selectedAgentID: String?
     var agents: [AgentSession]
@@ -90,7 +90,7 @@ final class CommandCenterStore {
                 ? saved.selectedProfileID
                 : saved.profiles[0].id
         } else {
-            let initialProfile = LightingProfile.commandCenter
+            let initialProfile = LightingProfile.factoryDefault
             ProfileLibrary.save(profiles: [initialProfile], selectedProfileID: initialProfile.id)
             ProfileLibrary.setDefaultProfileID(initialProfile.id)
         }
@@ -143,7 +143,7 @@ final class CommandCenterStore {
     }
 
     var selectedProfile: LightingProfile {
-        profiles.first(where: { $0.id == selectedProfileID }) ?? .commandCenter
+        profiles.first(where: { $0.id == selectedProfileID }) ?? .factoryDefault
     }
 
     var aggregateState: AgentState {
