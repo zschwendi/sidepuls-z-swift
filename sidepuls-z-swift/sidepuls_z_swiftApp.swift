@@ -1,9 +1,12 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @main
 struct SidePulseCommandCenterApp: App {
     @State private var store = CommandCenterStore()
+    @StateObject private var menuBarIconAnimator = MenuBarIconAnimator()
+    private let menuBarIconImageCache = MenuBarIconImageCache()
 
     var body: some Scene {
         WindowGroup("SidePulse Command Center", id: "command-center") {
@@ -14,33 +17,131 @@ struct SidePulseCommandCenterApp: App {
         MenuBarExtra {
             SidePulseMenuBarView(store: store)
         } label: {
-            SidePulseMenuBarIcon(store: store)
+            SidePulseMenuBarIcon(
+                store: store,
+                animator: menuBarIconAnimator,
+                imageCache: menuBarIconImageCache
+            )
         }
         .menuBarExtraStyle(.window)
     }
 }
 
-struct SidePulseMenuBarIcon: View {
-    @Bindable var store: CommandCenterStore
+@MainActor
+private final class MenuBarIconAnimator: ObservableObject {
+    static let frameCount = 12
 
-    var body: some View {
-        Image(nsImage: MenuBarIconRenderer.image(
-            style: store.menuBarIconStyle,
-            stateSymbol: store.aggregateState.symbol,
-            stateColorHex: store.selectedProfile.style(for: store.aggregateState).colorHex,
-            profile: store.selectedProfile,
-            slots: store.scene.slots,
-            ledCount: store.device.ledCount
-        ))
-        .renderingMode(.original)
-        .frame(width: MenuBarIconRenderer.size.width, height: MenuBarIconRenderer.size.height)
-        .accessibilityLabel("SidePulse, \(store.aggregateState.title), \(store.menuBarIconStyle.title)")
-        .help("SidePulse · \(store.aggregateState.title)")
+    @Published private(set) var frame = 0
+    private var timer: Timer?
+
+    func setAnimating(_ shouldAnimate: Bool) {
+        if shouldAnimate {
+            guard timer == nil else { return }
+            let timer = Timer(timeInterval: 1.0 / 12.0, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.frame = (self.frame + 1) % Self.frameCount
+                }
+            }
+            timer.tolerance = 0.012
+            RunLoop.main.add(timer, forMode: .common)
+            self.timer = timer
+        } else {
+            timer?.invalidate()
+            timer = nil
+            frame = 0
+        }
     }
 }
 
-enum MenuBarIconRenderer {
+private final class MenuBarIconImageCache {
+    private struct AnimationKey: Hashable {
+        var colorHex: String
+        var frame: Int
+    }
+
+    private var animationImages: [AnimationKey: NSImage] = [:]
+
+    func animatedMirroredImage(colorHex: String, frame: Int) -> NSImage {
+        let key = AnimationKey(
+            colorHex: colorHex.uppercased(),
+            frame: frame % MenuBarIconAnimator.frameCount
+        )
+        if let image = animationImages[key] { return image }
+
+        let image = MenuBarIconRenderer.mirroredAnimationImage(
+            colorHex: key.colorHex,
+            frame: key.frame,
+            frameCount: MenuBarIconAnimator.frameCount
+        )
+        animationImages[key] = image
+
+        if animationImages.count > MenuBarIconAnimator.frameCount * 8 {
+            animationImages = animationImages.filter { $0.key.colorHex == key.colorHex }
+        }
+        return image
+    }
+}
+
+private struct SidePulseMenuBarIcon: View {
+    @Bindable var store: CommandCenterStore
+    @ObservedObject var animator: MenuBarIconAnimator
+    let imageCache: MenuBarIconImageCache
+
+    private var shouldAnimate: Bool {
+        store.menuBarIconStyle == .mirroredFour
+            && (store.aggregateState == .working || store.aggregateState == .toolRunning)
+    }
+
+    var body: some View {
+        let colorHex = store.selectedProfile.style(for: store.aggregateState).colorHex
+        let image = shouldAnimate
+            ? imageCache.animatedMirroredImage(colorHex: colorHex, frame: animator.frame)
+            : MenuBarIconRenderer.image(
+                style: store.menuBarIconStyle,
+                stateSymbol: store.aggregateState.symbol,
+                stateColorHex: colorHex,
+                profile: store.selectedProfile,
+                slots: store.scene.slots,
+                ledCount: store.device.ledCount
+            )
+
+        Image(nsImage: image)
+            .renderingMode(.original)
+            .frame(width: MenuBarIconRenderer.size.width, height: MenuBarIconRenderer.size.height)
+            .accessibilityLabel("SidePulse, \(store.aggregateState.title), \(store.menuBarIconStyle.title)")
+            .help("SidePulse · \(store.aggregateState.title)")
+            .onAppear { animator.setAnimating(shouldAnimate) }
+            .onChange(of: shouldAnimate) { _, newValue in
+                animator.setAnimating(newValue)
+            }
+    }
+}
+
+private enum MenuBarIconRenderer {
     static let size = NSSize(width: 28, height: 16)
+
+    static func mirroredAnimationImage(
+        colorHex: String,
+        frame: Int,
+        frameCount: Int
+    ) -> NSImage {
+        let count = max(2, frameCount)
+        let progress = Double(frame % count) / Double(count)
+        let wavePosition = progress <= 0.5 ? progress * 6 : (1 - progress) * 6
+
+        return renderedImage { bounds in
+            drawHorizontalDots(
+                colors: Array(repeating: colorHex, count: 4),
+                opacities: (0..<4).map { index in
+                    max(0.24, 1 - abs(Double(index) - wavePosition) * 0.38)
+                },
+                diameter: 4,
+                spacing: 1.5,
+                in: bounds
+            )
+        }
+    }
 
     static func image(
         style: MenuBarIconStyle,
@@ -50,8 +151,7 @@ enum MenuBarIconRenderer {
         slots: [AgentLEDSlot],
         ledCount: Int
     ) -> NSImage {
-        let image = NSImage(size: size, flipped: false) { bounds in
-            NSGraphicsContext.current?.shouldAntialias = true
+        renderedImage { bounds in
             if style == .stateSymbol {
                 drawStateSymbol(stateSymbol, colorHex: stateColorHex, in: bounds)
             } else {
@@ -63,6 +163,15 @@ enum MenuBarIconRenderer {
                     in: bounds
                 )
             }
+        }
+    }
+
+    private static func renderedImage(
+        draw: @escaping (NSRect) -> Void
+    ) -> NSImage {
+        let image = NSImage(size: size, flipped: false) { bounds in
+            NSGraphicsContext.current?.shouldAntialias = true
+            draw(bounds)
             return true
         }
         image.isTemplate = false
@@ -94,16 +203,7 @@ enum MenuBarIconRenderer {
         let groups = MenuBarDotLayout.sourceIndices(for: style, ledCount: ledCount)
         guard !groups.isEmpty else { return }
 
-        let geometry: (diameter: CGFloat, spacing: CGFloat, vertical: Bool) = switch style {
-        case .horizontalEight: (2.6, 0.65, false)
-        case .verticalEight: (1.65, 0.3, true)
-        case .mirroredFour: (4, 1.5, false)
-        case .stateSymbol: (0, 0, false)
-        }
-        let totalLength = CGFloat(groups.count) * geometry.diameter
-            + CGFloat(max(0, groups.count - 1)) * geometry.spacing
-
-        for (position, indices) in groups.enumerated() {
+        let groupColors = groups.map { indices -> String? in
             let agents = indices.compactMap { index in
                 slots.first(where: { $0.index == index })?.agent
             }
@@ -113,38 +213,80 @@ enum MenuBarIconRenderer {
                 }
                 return left.updatedAt > right.updatedAt
             }
-
-            let rect: NSRect
-            if geometry.vertical {
-                rect = NSRect(
-                    x: bounds.midX - geometry.diameter / 2,
-                    y: bounds.maxY - (bounds.height - totalLength) / 2
-                        - geometry.diameter
-                        - CGFloat(position) * (geometry.diameter + geometry.spacing),
-                    width: geometry.diameter,
-                    height: geometry.diameter
-                )
-            } else {
-                rect = NSRect(
-                    x: bounds.minX + (bounds.width - totalLength) / 2
-                        + CGFloat(position) * (geometry.diameter + geometry.spacing),
-                    y: bounds.midY - geometry.diameter / 2,
-                    width: geometry.diameter,
-                    height: geometry.diameter
-                )
-            }
-            let path = NSBezierPath(ovalIn: rect)
-            if let representative {
-                color(hex: profile.style(for: representative.state).colorHex).setFill()
-            } else {
-                NSColor.labelColor.withAlphaComponent(0.38).setFill()
-            }
-            path.fill()
-
-            NSColor.labelColor.withAlphaComponent(representative == nil ? 0.3 : 0.18).setStroke()
-            path.lineWidth = 0.35
-            path.stroke()
+            return representative.map { profile.style(for: $0.state).colorHex }
         }
+
+        switch style {
+        case .horizontalEight, .mirroredFour:
+            drawHorizontalDots(
+                colors: groupColors.map { $0 ?? "" },
+                opacities: groupColors.map { $0 == nil ? 0.38 : 1 },
+                diameter: style == .horizontalEight ? 2.6 : 4,
+                spacing: style == .horizontalEight ? 0.65 : 1.5,
+                in: bounds
+            )
+        case .verticalEight:
+            drawVerticalDots(colors: groupColors, in: bounds)
+        case .stateSymbol:
+            break
+        }
+    }
+
+    private static func drawHorizontalDots(
+        colors: [String],
+        opacities: [Double],
+        diameter: CGFloat,
+        spacing: CGFloat,
+        in bounds: NSRect
+    ) {
+        let totalLength = CGFloat(colors.count) * diameter
+            + CGFloat(max(0, colors.count - 1)) * spacing
+        for index in colors.indices {
+            let rect = NSRect(
+                x: bounds.minX + (bounds.width - totalLength) / 2
+                    + CGFloat(index) * (diameter + spacing),
+                y: bounds.midY - diameter / 2,
+                width: diameter,
+                height: diameter
+            )
+            drawDot(
+                in: rect,
+                colorHex: colors[index].isEmpty ? nil : colors[index],
+                opacity: opacities.indices.contains(index) ? opacities[index] : 1
+            )
+        }
+    }
+
+    private static func drawVerticalDots(colors: [String?], in bounds: NSRect) {
+        let diameter: CGFloat = 1.65
+        let spacing: CGFloat = 0.3
+        let totalLength = CGFloat(colors.count) * diameter
+            + CGFloat(max(0, colors.count - 1)) * spacing
+        for index in colors.indices {
+            let rect = NSRect(
+                x: bounds.midX - diameter / 2,
+                y: bounds.maxY - (bounds.height - totalLength) / 2
+                    - diameter - CGFloat(index) * (diameter + spacing),
+                width: diameter,
+                height: diameter
+            )
+            drawDot(in: rect, colorHex: colors[index], opacity: colors[index] == nil ? 0.38 : 1)
+        }
+    }
+
+    private static func drawDot(
+        in rect: NSRect,
+        colorHex: String?,
+        opacity: Double
+    ) {
+        let active = colorHex != nil
+        let fill = colorHex.map { color(hex: $0) } ?? NSColor.labelColor
+        fill.withAlphaComponent(opacity).setFill()
+        let path = NSBezierPath(ovalIn: rect)
+        path.fill()
+        NSColor.labelColor.withAlphaComponent(active ? 0.18 : 0.3).setStroke()
+        path.lineWidth = 0.35
+        path.stroke()
     }
 
     private static func color(hex: String) -> NSColor {
