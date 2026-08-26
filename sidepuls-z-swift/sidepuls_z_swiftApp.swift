@@ -45,7 +45,6 @@ private final class MenuBarIconAnimator: ObservableObject {
 
 private struct SidePulseMenuBarIcon: View {
     @Bindable var store: CommandCenterStore
-    @Environment(\.colorScheme) private var colorScheme
     let animationTick: Int
 
     var body: some View {
@@ -61,8 +60,7 @@ private struct SidePulseMenuBarIcon: View {
         ).frame(at: elapsed)
         let image = MenuBarIconRenderer.image(
             style: store.menuBarIconStyle,
-            colors: frame.colors,
-            usesDarkBacking: colorScheme == .light
+            colors: frame.colors
         )
 
         Image(nsImage: image)
@@ -78,8 +76,7 @@ private enum MenuBarIconRenderer {
 
     static func image(
         style: MenuBarIconStyle,
-        colors: [LEDProgramColor],
-        usesDarkBacking: Bool
+        colors: [LEDProgramColor]
     ) -> NSImage {
         renderedImage { bounds in
             let groups = MenuBarDotLayout.sourceIndices(
@@ -94,7 +91,6 @@ private enum MenuBarIconRenderer {
                 colors: dotColors,
                 diameter: style == .horizontalEight ? 2.6 : 4,
                 spacing: style == .horizontalEight ? 0.65 : 1.5,
-                usesDarkBacking: usesDarkBacking,
                 in: bounds
             )
         }
@@ -116,7 +112,6 @@ private enum MenuBarIconRenderer {
         colors: [LEDProgramColor],
         diameter: CGFloat,
         spacing: CGFloat,
-        usesDarkBacking: Bool,
         in bounds: NSRect
     ) {
         let totalLength = CGFloat(colors.count) * diameter
@@ -134,15 +129,9 @@ private enum MenuBarIconRenderer {
             xRadius: pillRect.height / 2,
             yRadius: pillRect.height / 2
         )
-        let backingColor = usesDarkBacking
-            ? NSColor.black.withAlphaComponent(0.84)
-            : NSColor.white.withAlphaComponent(0.92)
-        backingColor.setFill()
+        NSColor.black.withAlphaComponent(0.92).setFill()
         pill.fill()
-        (usesDarkBacking
-            ? NSColor.white.withAlphaComponent(0.16)
-            : NSColor.black.withAlphaComponent(0.16)
-        ).setStroke()
+        NSColor.white.withAlphaComponent(0.2).setStroke()
         pill.lineWidth = 0.45
         pill.stroke()
 
@@ -154,18 +143,13 @@ private enum MenuBarIconRenderer {
                 width: diameter,
                 height: diameter
             )
-            drawDot(
-                in: rect,
-                color: colors[index],
-                usesDarkBacking: usesDarkBacking
-            )
+            drawDot(in: rect, color: colors[index])
         }
     }
 
     private static func drawDot(
         in rect: NSRect,
-        color: LEDProgramColor,
-        usesDarkBacking: Bool
+        color: LEDProgramColor
     ) {
         guard color.peak > 0.004 else { return }
         let fill = NSColor(
@@ -177,12 +161,6 @@ private enum MenuBarIconRenderer {
         fill.setFill()
         let path = NSBezierPath(ovalIn: rect)
         path.fill()
-        (usesDarkBacking
-            ? NSColor.white.withAlphaComponent(0.22)
-            : NSColor.black.withAlphaComponent(0.28)
-        ).setStroke()
-        path.lineWidth = 0.35
-        path.stroke()
     }
 }
 
