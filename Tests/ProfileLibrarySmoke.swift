@@ -16,13 +16,6 @@ enum ProfileLibrarySmoke {
             .init(state: .completed, colorHex: "#00D300", secondaryColorHex: "#7C3AED", motion: .solid, cycleSeconds: 1, intensity: 0.85),
         ])
 
-        let overlaySuiteName = "sidepulse.status-overlay-smoke.\(UUID().uuidString)"
-        let overlayDefaults = UserDefaults(suiteName: overlaySuiteName)!
-        defer { overlayDefaults.removePersistentDomain(forName: overlaySuiteName) }
-        precondition(AppPreferences.statusOverlayEnabled(from: overlayDefaults))
-        AppPreferences.saveStatusOverlayEnabled(false, to: overlayDefaults)
-        precondition(!AppPreferences.statusOverlayEnabled(from: overlayDefaults))
-
         let protectedSuiteName = "sidepulse.profile-protected-smoke.\(UUID().uuidString)"
         let protectedDefaults = UserDefaults(suiteName: protectedSuiteName)!
         defer { protectedDefaults.removePersistentDomain(forName: protectedSuiteName) }
@@ -139,9 +132,13 @@ enum ProfileLibrarySmoke {
         precondition(AppPreferences.agentDisplayMode(from: preferencesDefaults) == .simple)
         AppPreferences.saveAgentDisplayMode(.perAgent, to: preferencesDefaults)
         precondition(AppPreferences.agentDisplayMode(from: preferencesDefaults) == .perAgent)
-        precondition(AppPreferences.menuBarIconStyle(from: preferencesDefaults) == .stateSymbol)
-        AppPreferences.saveMenuBarIconStyle(.mirroredFour, to: preferencesDefaults)
-        precondition(AppPreferences.menuBarIconStyle(from: preferencesDefaults) == .mirroredFour)
+        precondition(AppPreferences.menuBarIconStyle(from: preferencesDefaults) == .horizontalFour)
+        preferencesDefaults.set("mirroredFour", forKey: "sidepulse.menu-bar-icon-style.v1")
+        precondition(AppPreferences.menuBarIconStyle(from: preferencesDefaults) == .horizontalFour)
+        preferencesDefaults.set("verticalEight", forKey: "sidepulse.menu-bar-icon-style.v1")
+        precondition(AppPreferences.menuBarIconStyle(from: preferencesDefaults) == .horizontalEight)
+        AppPreferences.saveMenuBarIconStyle(.horizontalFour, to: preferencesDefaults)
+        precondition(AppPreferences.menuBarIconStyle(from: preferencesDefaults) == .horizontalFour)
         precondition(AppPreferences.batteryIndicatorSettings(from: preferencesDefaults) == BatteryIndicatorSettings())
         var batterySettings = BatteryIndicatorSettings()
         batterySettings.mode = .statusBottom

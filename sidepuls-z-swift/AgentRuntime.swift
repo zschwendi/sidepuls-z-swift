@@ -596,7 +596,9 @@ private extension NativeAgentRuntime {
                 toolName: activity.toolName,
                 updatedAt: updatedAt,
                 message: "Detected from Grok Bot local activity",
-                openURL: URL(string: "grokbot://")
+                // Grok Bot only exposes a generic app-open route today; its
+                // public deep-link contract does not include an agent ID.
+                openURL: URL(string: "grokbot://app/v1/open")
             )
 
             let isRecent = now.timeIntervalSince(updatedAt) <= 15 * 60

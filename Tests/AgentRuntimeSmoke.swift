@@ -158,6 +158,11 @@ enum AgentRuntimeSmoke {
             agents.first(where: { $0.sessionID == toolID })?.openURL?.scheme == "codex",
             "Local Codex sessions must expose a selectable desktop deep link"
         )
+        precondition(
+            agents.first(where: { $0.sessionID == grokBotID })?.openURL?.absoluteString
+                == "grokbot://app/v1/open",
+            "Grok Bot sessions must use the app's supported open route"
+        )
 
         runtime.acknowledgeCompleted(sessionID: "codex:session:\(completedID)")
         Thread.sleep(forTimeInterval: 0.5)

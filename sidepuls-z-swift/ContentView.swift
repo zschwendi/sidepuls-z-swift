@@ -312,13 +312,6 @@ struct SignalModeControl: View {
                     .pickerStyle(.menu)
                 }
 
-                Toggle("Dynamic Agent Island", isOn: Binding(
-                    get: { store.statusOverlayEnabled },
-                    set: { store.setStatusOverlayEnabled($0) }
-                ))
-                .font(.caption)
-                .toggleStyle(.switch)
-                .controlSize(.small)
             }
             .frame(width: 240)
         }

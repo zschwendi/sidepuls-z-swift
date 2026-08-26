@@ -166,7 +166,6 @@ enum AppPreferences {
     private static let batteryIndicatorKey = "sidepulse.battery-indicator.v1"
     private static let agentDisplayModeKey = "sidepulse.agent-display-mode.v1"
     private static let menuBarIconStyleKey = "sidepulse.menu-bar-icon-style.v1"
-    private static let statusOverlayEnabledKey = "sidepulse.status-overlay-enabled.v1"
 
     static func liveOutputEnabled(from defaults: UserDefaults = .standard) -> Bool {
         guard defaults.object(forKey: liveOutputKey) != nil else {
@@ -196,10 +195,14 @@ enum AppPreferences {
     }
 
     static func menuBarIconStyle(from defaults: UserDefaults = .standard) -> MenuBarIconStyle {
-        guard let rawValue = defaults.string(forKey: menuBarIconStyleKey),
-              let style = MenuBarIconStyle(rawValue: rawValue)
-        else { return .stateSymbol }
-        return style
+        guard let rawValue = defaults.string(forKey: menuBarIconStyleKey) else {
+            return .horizontalFour
+        }
+        if let style = MenuBarIconStyle(rawValue: rawValue) { return style }
+
+        // Preserve the closest horizontal layout when upgrading from the
+        // retired vertical, mirrored, and symbol choices.
+        return rawValue == "verticalEight" ? .horizontalEight : .horizontalFour
     }
 
     static func saveMenuBarIconStyle(
@@ -207,18 +210,6 @@ enum AppPreferences {
         to defaults: UserDefaults = .standard
     ) {
         defaults.set(style.rawValue, forKey: menuBarIconStyleKey)
-    }
-
-    static func statusOverlayEnabled(from defaults: UserDefaults = .standard) -> Bool {
-        guard defaults.object(forKey: statusOverlayEnabledKey) != nil else { return true }
-        return defaults.bool(forKey: statusOverlayEnabledKey)
-    }
-
-    static func saveStatusOverlayEnabled(
-        _ enabled: Bool,
-        to defaults: UserDefaults = .standard
-    ) {
-        defaults.set(enabled, forKey: statusOverlayEnabledKey)
     }
 
     static func batteryIndicatorSettings(

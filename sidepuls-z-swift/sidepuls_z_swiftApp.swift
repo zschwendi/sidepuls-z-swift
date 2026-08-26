@@ -4,10 +4,8 @@ import SwiftUI
 
 @main
 struct SidePulseCommandCenterApp: App {
-    @NSApplicationDelegateAdaptor(SidePulseAppDelegate.self) private var appDelegate
     @State private var store = CommandCenterStore()
     @StateObject private var menuBarIconAnimator = MenuBarIconAnimator()
-    private let menuBarIconImageCache = MenuBarIconImageCache()
 
     var body: some Scene {
         WindowGroup("SidePulse Command Center", id: "command-center") {
@@ -20,8 +18,7 @@ struct SidePulseCommandCenterApp: App {
         } label: {
             SidePulseMenuBarIcon(
                 store: store,
-                animationFrame: menuBarIconAnimator.frame,
-                imageCache: menuBarIconImageCache
+                animationTick: menuBarIconAnimator.tick
             )
         }
         .menuBarExtraStyle(.window)
@@ -30,16 +27,14 @@ struct SidePulseCommandCenterApp: App {
 
 @MainActor
 private final class MenuBarIconAnimator: ObservableObject {
-    static let frameCount = 12
-
-    @Published private(set) var frame = 0
+    @Published private(set) var tick = 0
     private var timer: Timer?
 
     init() {
         let timer = Timer(timeInterval: 1.0 / 12.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.frame = (self.frame + 1) % Self.frameCount
+                self.tick = (self.tick + 1) % 120
             }
         }
         timer.tolerance = 0.012
@@ -48,57 +43,25 @@ private final class MenuBarIconAnimator: ObservableObject {
     }
 }
 
-private final class MenuBarIconImageCache {
-    private struct AnimationKey: Hashable {
-        var colorHex: String
-        var frame: Int
-    }
-
-    private var animationImages: [AnimationKey: NSImage] = [:]
-
-    func animatedMirroredImage(colorHex: String, frame: Int) -> NSImage {
-        let key = AnimationKey(
-            colorHex: colorHex.uppercased(),
-            frame: frame % MenuBarIconAnimator.frameCount
-        )
-        if let image = animationImages[key] { return image }
-
-        let image = MenuBarIconRenderer.mirroredAnimationImage(
-            colorHex: key.colorHex,
-            frame: key.frame,
-            frameCount: MenuBarIconAnimator.frameCount
-        )
-        animationImages[key] = image
-
-        if animationImages.count > MenuBarIconAnimator.frameCount * 8 {
-            animationImages = animationImages.filter { $0.key.colorHex == key.colorHex }
-        }
-        return image
-    }
-}
-
 private struct SidePulseMenuBarIcon: View {
     @Bindable var store: CommandCenterStore
-    let animationFrame: Int
-    let imageCache: MenuBarIconImageCache
-
-    private var shouldAnimate: Bool {
-        store.menuBarIconStyle == .mirroredFour
-            && (store.aggregateState == .working || store.aggregateState == .toolRunning)
-    }
+    let animationTick: Int
 
     var body: some View {
-        let colorHex = store.selectedProfile.style(for: store.aggregateState).colorHex
-        let image = shouldAnimate
-            ? imageCache.animatedMirroredImage(colorHex: colorHex, frame: animationFrame)
-            : MenuBarIconRenderer.image(
-                style: store.menuBarIconStyle,
-                stateSymbol: store.aggregateState.symbol,
-                stateColorHex: colorHex,
-                profile: store.selectedProfile,
-                slots: store.scene.slots,
-                ledCount: store.device.ledCount
-            )
+        let _ = animationTick
+        let program = store.device.connected ? store.device.activeProgram : store.scene.program
+        let elapsed = store.device.connected
+            ? store.device.lastWrite.map { max(0, Date.now.timeIntervalSince($0)) }
+                ?? Date.now.timeIntervalSinceReferenceDate
+            : Date.now.timeIntervalSinceReferenceDate
+        let frame = LEDFirmwareProgram(
+            program: program,
+            ledCount: store.device.ledCount
+        ).frame(at: elapsed)
+        let image = MenuBarIconRenderer.image(
+            style: store.menuBarIconStyle,
+            colors: frame.colors
+        )
 
         Image(nsImage: image)
             .renderingMode(.original)
@@ -111,48 +74,25 @@ private struct SidePulseMenuBarIcon: View {
 private enum MenuBarIconRenderer {
     static let size = NSSize(width: 28, height: 16)
 
-    static func mirroredAnimationImage(
-        colorHex: String,
-        frame: Int,
-        frameCount: Int
-    ) -> NSImage {
-        let count = max(2, frameCount)
-        let progress = Double(frame % count) / Double(count)
-        let wavePosition = progress <= 0.5 ? progress * 6 : (1 - progress) * 6
-
-        return renderedImage { bounds in
-            drawHorizontalDots(
-                colors: Array(repeating: colorHex, count: 4),
-                opacities: (0..<4).map { index in
-                    max(0.24, 1 - abs(Double(index) - wavePosition) * 0.38)
-                },
-                diameter: 4,
-                spacing: 1.5,
-                in: bounds
-            )
-        }
-    }
-
     static func image(
         style: MenuBarIconStyle,
-        stateSymbol: String,
-        stateColorHex: String,
-        profile: LightingProfile,
-        slots: [AgentLEDSlot],
-        ledCount: Int
+        colors: [LEDProgramColor]
     ) -> NSImage {
         renderedImage { bounds in
-            if style == .stateSymbol {
-                drawStateSymbol(stateSymbol, colorHex: stateColorHex, in: bounds)
-            } else {
-                drawDots(
-                    style: style,
-                    profile: profile,
-                    slots: slots,
-                    ledCount: ledCount,
-                    in: bounds
-                )
+            let groups = MenuBarDotLayout.sourceIndices(
+                for: style,
+                ledCount: colors.count
+            )
+            let dotColors = groups.map { indices in
+                indices.compactMap { colors.indices.contains($0) ? colors[$0] : nil }
+                    .max(by: { $0.peak < $1.peak }) ?? .black
             }
+            drawHorizontalDots(
+                colors: dotColors,
+                diameter: style == .horizontalEight ? 2.6 : 4,
+                spacing: style == .horizontalEight ? 0.65 : 1.5,
+                in: bounds
+            )
         }
     }
 
@@ -168,63 +108,8 @@ private enum MenuBarIconRenderer {
         return image
     }
 
-    private static func drawStateSymbol(_ name: String, colorHex: String, in bounds: NSRect) {
-        guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: "SidePulse")?
-            .withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
-        else { return }
-        let rect = NSRect(
-            x: bounds.midX - 7,
-            y: bounds.midY - 7,
-            width: 14,
-            height: 14
-        )
-        symbol.draw(in: rect)
-        color(hex: colorHex).setFill()
-        rect.fill(using: .sourceAtop)
-    }
-
-    private static func drawDots(
-        style: MenuBarIconStyle,
-        profile: LightingProfile,
-        slots: [AgentLEDSlot],
-        ledCount: Int,
-        in bounds: NSRect
-    ) {
-        let groups = MenuBarDotLayout.sourceIndices(for: style, ledCount: ledCount)
-        guard !groups.isEmpty else { return }
-
-        let groupColors = groups.map { indices -> String? in
-            let agents = indices.compactMap { index in
-                slots.first(where: { $0.index == index })?.agent
-            }
-            let representative = agents.min { left, right in
-                if left.state.priority != right.state.priority {
-                    return left.state.priority < right.state.priority
-                }
-                return left.updatedAt > right.updatedAt
-            }
-            return representative.map { profile.style(for: $0.state).colorHex }
-        }
-
-        switch style {
-        case .horizontalEight, .mirroredFour:
-            drawHorizontalDots(
-                colors: groupColors.map { $0 ?? "" },
-                opacities: groupColors.map { $0 == nil ? 0.38 : 1 },
-                diameter: style == .horizontalEight ? 2.6 : 4,
-                spacing: style == .horizontalEight ? 0.65 : 1.5,
-                in: bounds
-            )
-        case .verticalEight:
-            drawVerticalDots(colors: groupColors, in: bounds)
-        case .stateSymbol:
-            break
-        }
-    }
-
     private static func drawHorizontalDots(
-        colors: [String],
-        opacities: [Double],
+        colors: [LEDProgramColor],
         diameter: CGFloat,
         spacing: CGFloat,
         in bounds: NSRect
@@ -239,55 +124,29 @@ private enum MenuBarIconRenderer {
                 width: diameter,
                 height: diameter
             )
-            drawDot(
-                in: rect,
-                colorHex: colors[index].isEmpty ? nil : colors[index],
-                opacity: opacities.indices.contains(index) ? opacities[index] : 1
-            )
-        }
-    }
-
-    private static func drawVerticalDots(colors: [String?], in bounds: NSRect) {
-        let diameter: CGFloat = 1.65
-        let spacing: CGFloat = 0.3
-        let totalLength = CGFloat(colors.count) * diameter
-            + CGFloat(max(0, colors.count - 1)) * spacing
-        for index in colors.indices {
-            let rect = NSRect(
-                x: bounds.midX - diameter / 2,
-                y: bounds.maxY - (bounds.height - totalLength) / 2
-                    - diameter - CGFloat(index) * (diameter + spacing),
-                width: diameter,
-                height: diameter
-            )
-            drawDot(in: rect, colorHex: colors[index], opacity: colors[index] == nil ? 0.38 : 1)
+            drawDot(in: rect, color: colors[index])
         }
     }
 
     private static func drawDot(
         in rect: NSRect,
-        colorHex: String?,
-        opacity: Double
+        color: LEDProgramColor
     ) {
-        let active = colorHex != nil
-        let fill = colorHex.map { color(hex: $0) } ?? NSColor.labelColor
-        fill.withAlphaComponent(opacity).setFill()
+        let active = color.peak > 0.004
+        let fill = active
+            ? NSColor(
+                srgbRed: color.red,
+                green: color.green,
+                blue: color.blue,
+                alpha: 1
+            )
+            : NSColor.labelColor.withAlphaComponent(0.16)
+        fill.setFill()
         let path = NSBezierPath(ovalIn: rect)
         path.fill()
-        NSColor.labelColor.withAlphaComponent(active ? 0.18 : 0.3).setStroke()
+        NSColor.labelColor.withAlphaComponent(active ? 0.12 : 0.22).setStroke()
         path.lineWidth = 0.35
         path.stroke()
-    }
-
-    private static func color(hex: String) -> NSColor {
-        let clean = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-        let value = UInt64(clean, radix: 16) ?? 0xFFFFFF
-        return NSColor(
-            srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
-            green: CGFloat((value >> 8) & 0xFF) / 255,
-            blue: CGFloat(value & 0xFF) / 255,
-            alpha: 1
-        )
     }
 }
 
@@ -333,15 +192,6 @@ struct SidePulseMenuBarView: View {
                 .pickerStyle(.menu)
                 .frame(width: 150)
             }
-
-            Toggle(isOn: Binding(
-                get: { store.statusOverlayEnabled },
-                set: { store.setStatusOverlayEnabled($0) }
-            )) {
-                Label("Dynamic Agent Island", systemImage: "macbook")
-                    .font(.caption.weight(.medium))
-            }
-            .toggleStyle(.switch)
 
             HStack(alignment: .top, spacing: 14) {
                 VStack(spacing: 7) {

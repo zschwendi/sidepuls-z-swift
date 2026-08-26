@@ -35,12 +35,10 @@ enum SceneCompilerSmoke {
         precondition(profile.style(for: .error).motion == .solid)
         precondition(!AgentState.allCases.contains(where: { $0.rawValue == "progress" }))
         precondition(MenuBarDotLayout.sourceIndices(for: .horizontalEight) == (0..<8).map { [$0] })
-        precondition(MenuBarDotLayout.sourceIndices(for: .verticalEight) == (0..<8).reversed().map { [$0] })
-        precondition(MenuBarDotLayout.sourceIndices(for: .mirroredFour) == [
-            [0, 7], [1, 6], [2, 5], [3, 4],
+        precondition(MenuBarDotLayout.sourceIndices(for: .horizontalFour) == [
+            [0, 1], [2, 3], [4, 5], [6, 7],
         ])
-        precondition(MenuBarDotLayout.sourceIndices(for: .mirroredFour, ledCount: 2) == [[0, 1]])
-        precondition(MenuBarDotLayout.sourceIndices(for: .stateSymbol).isEmpty)
+        precondition(MenuBarDotLayout.sourceIndices(for: .horizontalFour, ledCount: 2) == [[0], [1]])
         precondition(SidePulseHardwareController.refreshInterval(for: "off") == nil)
         precondition(SidePulseHardwareController.refreshInterval(for: "0:#00FF00") == 15)
         precondition(

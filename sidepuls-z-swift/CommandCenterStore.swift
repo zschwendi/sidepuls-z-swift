@@ -64,7 +64,6 @@ final class CommandCenterStore {
     var batterySettings = AppPreferences.batteryIndicatorSettings()
     var agentDisplayMode = AppPreferences.agentDisplayMode()
     var menuBarIconStyle = AppPreferences.menuBarIconStyle()
-    var statusOverlayEnabled = AppPreferences.statusOverlayEnabled()
     var lidIsClosed: Bool?
     var lastLidTransitionAt: Date?
     var scene = CompiledScene(program: "", slots: [])
@@ -93,9 +92,7 @@ final class CommandCenterStore {
     @ObservationIgnored private var lastLowBatteryAlertAt: Date?
     @ObservationIgnored private var isShowingPreviewData = true
     @ObservationIgnored private var lastOutputStates: [String: AgentState] = [:]
-    @ObservationIgnored private var lastPublishedOverlaySignal: SidePulseStatusOverlaySignal?
     @ObservationIgnored private var profileSelectionObserver: NSObjectProtocol?
-    @ObservationIgnored private var agentSpaceSelectionObserver: NSObjectProtocol?
     @ObservationIgnored private var focusMonitor: Timer?
     @ObservationIgnored private var hasObservedFocusContext = false
     @ObservationIgnored private var lastObservedFocusProfileID: UUID?
@@ -194,17 +191,6 @@ final class CommandCenterStore {
         guard menuBarIconStyle != style else { return }
         menuBarIconStyle = style
         AppPreferences.saveMenuBarIconStyle(style)
-    }
-
-    func setStatusOverlayEnabled(_ enabled: Bool) {
-        guard statusOverlayEnabled != enabled else { return }
-        statusOverlayEnabled = enabled
-        AppPreferences.saveStatusOverlayEnabled(enabled)
-        if enabled {
-            publishStatusOverlayIfNeeded(force: true)
-        } else {
-            NotificationCenter.default.post(name: .sidePulseStatusOverlayDismiss, object: nil)
-        }
     }
 
     func updateSelectedProfile(_ update: (inout LightingProfile) -> Void) {
@@ -349,7 +335,6 @@ final class CommandCenterStore {
         )
         scene = proDevice.connected || !dotDevice.connected ? proScene : dotScene
         syncHardwareOutput()
-        if !isShowingPreviewData { publishStatusOverlayIfNeeded() }
     }
 
     func previewSelectedState() {
@@ -450,20 +435,6 @@ final class CommandCenterStore {
                 self?.reloadProfileSelection()
             }
         }
-        agentSpaceSelectionObserver = NotificationCenter.default.addObserver(
-            forName: .sidePulseAgentSpaceSelectAgent,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let agentID = notification.object as? String else { return }
-            Task { @MainActor [weak self] in
-                guard let self,
-                      let agent = self.agents.first(where: { $0.id == agentID })
-                else { return }
-                self.selectAgent(agent)
-            }
-        }
-
         focusMonitor = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.syncFocusProfile()
@@ -561,7 +532,6 @@ final class CommandCenterStore {
                 self.integrations = integrations
                 self.runtimeMessage = message
                 self.recompile()
-                self.publishStatusOverlayIfNeeded()
             }
         }
         self.runtime = runtime
@@ -639,35 +609,6 @@ final class CommandCenterStore {
     private func resetAllocators() {
         proAllocator.reset()
         dotAllocator.reset()
-    }
-
-    private func publishStatusOverlayIfNeeded(force: Bool = false) {
-        guard statusOverlayEnabled else { return }
-        let state = aggregateState
-        let signal = SidePulseStatusOverlaySignal(
-            state: state,
-            colorHex: selectedProfile.style(for: state).colorHex,
-            agents: agents.map { agent in
-                let displayedState: AgentState = agentDisplayMode == .simple && agent.state == .toolRunning
-                    ? .working
-                    : agent.state
-                return SidePulseAgentSpaceItem(
-                    id: agent.id,
-                    name: agent.name,
-                    project: agent.project,
-                    provider: agent.provider,
-                    state: displayedState,
-                    colorHex: selectedProfile.style(for: displayedState).colorHex,
-                    updatedAt: agent.updatedAt
-                )
-            }
-        )
-        guard force || signal != lastPublishedOverlaySignal else { return }
-        lastPublishedOverlaySignal = signal
-        NotificationCenter.default.post(
-            name: .sidePulseStatusOverlaySignalDidChange,
-            object: signal
-        )
     }
 
     private func hardwareTiming(
