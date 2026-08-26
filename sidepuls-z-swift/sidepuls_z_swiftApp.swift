@@ -49,7 +49,7 @@ private struct SidePulseMenuBarIcon: View {
 
     var body: some View {
         let _ = animationTick
-        let program = store.menuBarIconProgram
+        let program = store.softwareDisplayProgram
         let elapsed = store.device.connected
             ? store.device.lastWrite.map { max(0, Date.now.timeIntervalSince($0)) }
                 ?? Date.now.timeIntervalSinceReferenceDate
@@ -330,7 +330,7 @@ private struct MenuBarPhysicalArrayView: View {
     @Bindable var store: CommandCenterStore
 
     var body: some View {
-        let program = store.liveProgram
+        let program = store.softwareDisplayProgram
         let firmware = LEDFirmwareProgram(program: program, ledCount: store.device.ledCount)
 
         TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in

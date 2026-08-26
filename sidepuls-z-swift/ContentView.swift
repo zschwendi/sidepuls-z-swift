@@ -98,7 +98,7 @@ struct OverviewView: View {
                 DashboardSectionHeader(
                     eyebrow: "LIVE HARDWARE",
                     title: "What your SidePulse is showing",
-                    detail: "A live rendering of the exact program written to the device, with LED \(store.device.ledCount) at the top and LED 1 at the bottom."
+                    detail: "A full-brightness preview of the device state, with LED \(store.device.ledCount) at the top and LED 1 at the bottom."
                 )
                 LEDDeckView(store: store)
 
@@ -391,7 +391,7 @@ struct LEDDeckView: View {
 
     var body: some View {
         let firmware = LEDFirmwareProgram(
-            program: store.device.connected ? store.device.activeProgram : "off",
+            program: store.connectedSoftwareDisplayProgram,
             ledCount: store.device.ledCount
         )
         GlassEffectContainer(spacing: 14) {
@@ -477,7 +477,7 @@ struct LEDDeckView: View {
                 }
 
                 Label(
-                    "The squircles mirror the hardware's color, global brightness, easing, delays, and animation phase.",
+                    "The squircles mirror the hardware's color, easing, delays, and animation phase. Max Brightness only changes the physical LEDs.",
                     systemImage: "arrow.down"
                 )
                 .font(.caption)

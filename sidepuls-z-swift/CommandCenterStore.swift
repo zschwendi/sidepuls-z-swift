@@ -165,17 +165,13 @@ final class CommandCenterStore {
         profiles.first(where: { $0.id == selectedProfileID }) ?? .factoryDefault
     }
 
-    var liveProgram: String {
-        if device.connected { return device.activeProgram }
-        return LEDProgramOutputCalibration.scalingBrightness(
-            in: scene.program,
-            by: universalBrightness
-        )
-    }
-
-    var menuBarIconProgram: String {
+    var softwareDisplayProgram: String {
         let program = device.connected ? device.sourceProgram : scene.program
         return LEDProgramOutputCalibration.settingBrightness(in: program, to: 255)
+    }
+
+    var connectedSoftwareDisplayProgram: String {
+        device.connected ? softwareDisplayProgram : "off"
     }
 
     var aggregateState: AgentState {
