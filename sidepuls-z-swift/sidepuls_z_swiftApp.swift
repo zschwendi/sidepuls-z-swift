@@ -116,6 +116,25 @@ private enum MenuBarIconRenderer {
     ) {
         let totalLength = CGFloat(colors.count) * diameter
             + CGFloat(max(0, colors.count - 1)) * spacing
+        let horizontalPadding: CGFloat = colors.count > 4 ? 1.15 : 2.5
+        let verticalPadding: CGFloat = colors.count > 4 ? 2.1 : 1.8
+        let pillRect = NSRect(
+            x: bounds.midX - (totalLength + horizontalPadding * 2) / 2,
+            y: bounds.midY - (diameter + verticalPadding * 2) / 2,
+            width: totalLength + horizontalPadding * 2,
+            height: diameter + verticalPadding * 2
+        )
+        let pill = NSBezierPath(
+            roundedRect: pillRect,
+            xRadius: pillRect.height / 2,
+            yRadius: pillRect.height / 2
+        )
+        NSColor.white.withAlphaComponent(0.92).setFill()
+        pill.fill()
+        NSColor.black.withAlphaComponent(0.16).setStroke()
+        pill.lineWidth = 0.45
+        pill.stroke()
+
         for index in colors.indices {
             let rect = NSRect(
                 x: bounds.minX + (bounds.width - totalLength) / 2
@@ -140,11 +159,11 @@ private enum MenuBarIconRenderer {
                 blue: color.blue,
                 alpha: 1
             )
-            : NSColor.labelColor.withAlphaComponent(0.16)
+            : NSColor.black.withAlphaComponent(0.16)
         fill.setFill()
         let path = NSBezierPath(ovalIn: rect)
         path.fill()
-        NSColor.labelColor.withAlphaComponent(active ? 0.12 : 0.22).setStroke()
+        NSColor.black.withAlphaComponent(active ? 0.28 : 0.18).setStroke()
         path.lineWidth = 0.35
         path.stroke()
     }
