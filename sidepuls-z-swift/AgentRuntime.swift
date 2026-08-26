@@ -53,6 +53,33 @@ struct CompletionAcknowledgements: Codable, Sendable {
     }
 }
 
+enum AgentTimelinePolicy {
+    static func includes(_ session: AgentSession) -> Bool {
+        guard session.provider == .codex else { return true }
+
+        if session.id.lowercased().contains(":agent:") {
+            return false
+        }
+        if session.message?.lowercased() == "codex subagent" {
+            return false
+        }
+
+        let fallbackSuffix = "(\(String(session.sessionID.prefix(8))))"
+        if session.name.hasSuffix(fallbackSuffix), isInternalBackgroundPayload(session.message) {
+            return false
+        }
+        return true
+    }
+
+    private static func isInternalBackgroundPayload(_ message: String?) -> Bool {
+        guard let message,
+              let data = message.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+        return object.keys.contains("suggestions") || object.keys.contains("exclude")
+    }
+}
+
 final class NativeAgentRuntime: @unchecked Sendable {
     typealias UpdateHandler = @Sendable ([AgentSession], String, [AgentIntegrationStatus]) -> Void
 
@@ -224,6 +251,15 @@ final class NativeAgentRuntime: @unchecked Sendable {
         let childAgentID = string(in: raw, keys: ["agent_id", "agentId"])
         let identity = childAgentID.map { "agent:\($0)" } ?? "session:\(sessionID)"
         let key = "\(provider.rawValue):\(identity)"
+        if childAgentID != nil {
+            let changed = sessions.removeValue(forKey: key) != nil
+            hookEventDates[key] = nil
+            if changed {
+                writeLatestStateLocked()
+                publishLocked(force: true)
+            }
+            return
+        }
         let previous = sessions[key]
         let cwd = string(in: raw, keys: ["cwd", "workspaceRoot"]) ?? previous?.cwd
         let project = projectName(cwd) ?? previous?.project ?? "Unknown Project"
@@ -280,7 +316,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
             let provider = AgentProvider(rawValue: status.provider.lowercased()) ?? .unknown
             let sessionID = status.sessionID ?? status.agentID
             let project = projectName(status.cwd) ?? "Unknown Project"
-            loaded[status.agentID] = AgentSession(
+            let session = AgentSession(
                 id: status.agentID,
                 provider: provider,
                 sessionID: sessionID,
@@ -294,6 +330,9 @@ final class NativeAgentRuntime: @unchecked Sendable {
                 message: status.message,
                 openURL: status.openURL.flatMap(URL.init(string:))
             )
+            if AgentTimelinePolicy.includes(session) {
+                loaded[status.agentID] = session
+            }
         }
         sessions = loaded
         publishLocked(force: true)
@@ -302,6 +341,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
     private func visibleSessionsLocked() -> [AgentSession] {
         sessions.values
             .filter { session in
+                guard AgentTimelinePolicy.includes(session) else { return false }
                 if session.state == .idle { return false }
                 return completionAcknowledgements.shouldDisplay(session)
             }
@@ -865,8 +905,8 @@ private extension NativeAgentRuntime {
         let cwd = string(in: metadata, keys: ["cwd"])
         let project = projectName(cwd) ?? "Codex"
         let subagent = subagentIdentity(in: metadata)
-        let fallbackName = subagent.map { "\($0) · \(project)" }
-            ?? "\(project) (\(String(sessionID.prefix(8))))"
+        guard subagent == nil else { return nil }
+        let fallbackName = "\(project) (\(String(sessionID.prefix(8))))"
         let activity = inferCodexActivity(snapshot.records)
         let updatedAt = snapshot.modifiedAt > now ? now : snapshot.modifiedAt
 
@@ -881,13 +921,13 @@ private extension NativeAgentRuntime {
             eventName: activity.eventName,
             toolName: activity.toolName,
             updatedAt: updatedAt,
-            message: subagent == nil ? "Detected from local Codex activity" : "Codex subagent",
+            message: "Detected from local Codex activity",
             openURL: URL(string: "codex://threads/\(sessionID)")
         )
     }
 
     func subagentIdentity(in metadata: [String: Any]) -> String? {
-        if string(in: metadata, keys: ["thread_source"]) == "subagent" {
+        if string(in: metadata, keys: ["thread_source"])?.lowercased() == "subagent" {
             return "Subagent"
         }
         guard let source = metadata["source"] as? [String: Any],

@@ -24,6 +24,7 @@ private final class RuntimeProbe: @unchecked Sendable {
 enum AgentRuntimeSmoke {
     static func main() throws {
         testCompletionAcknowledgements()
+        testAgentTimelinePolicy()
         testGrokBotInferenceStability()
 
         let temporaryRoot = URL(
@@ -448,5 +449,58 @@ enum AgentRuntimeSmoke {
         finished.state = .completed
         finished.updatedAt = finishedAt.addingTimeInterval(3)
         precondition(acknowledgements.shouldDisplay(finished), "A later completion must become green again")
+    }
+
+    private static func testAgentTimelinePolicy() {
+        func session(
+            id: String,
+            sessionID: String = "top-level-session",
+            name: String = "Named task",
+            provider: AgentProvider = .codex,
+            message: String? = nil
+        ) -> AgentSession {
+            AgentSession(
+                id: id,
+                provider: provider,
+                sessionID: sessionID,
+                name: name,
+                project: "SidePulse",
+                cwd: "/tmp/SidePulse",
+                state: .working,
+                eventName: "Working",
+                toolName: nil,
+                updatedAt: .now,
+                message: message
+            )
+        }
+
+        precondition(AgentTimelinePolicy.includes(session(id: "codex:session:top-level-session")))
+        precondition(!AgentTimelinePolicy.includes(session(id: "codex:agent:child-agent")))
+        precondition(!AgentTimelinePolicy.includes(session(
+            id: "codex:session:subagent-session",
+            message: "Codex subagent"
+        )))
+
+        let backgroundID = "01a03f35-42a8-74e1-86c2-3d0c81d778ef"
+        let backgroundPayload = #"{"suggestions":[{"title":"Internal follow-up"}]}"#
+        precondition(!AgentTimelinePolicy.includes(session(
+            id: "codex:session:\(backgroundID)",
+            sessionID: backgroundID,
+            name: "SidePulse (01a03f35)",
+            message: backgroundPayload
+        )))
+        precondition(AgentTimelinePolicy.includes(session(
+            id: "codex:session:\(backgroundID)",
+            sessionID: backgroundID,
+            name: "User-named JSON task",
+            message: backgroundPayload
+        )))
+        precondition(AgentTimelinePolicy.includes(session(
+            id: "grok_bot:session:\(backgroundID)",
+            sessionID: backgroundID,
+            name: "Grok Bot task",
+            provider: .grokBot,
+            message: backgroundPayload
+        )))
     }
 }
