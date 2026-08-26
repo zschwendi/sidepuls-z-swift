@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import ServiceManagement
 import UniformTypeIdentifiers
 
 enum CommandCenterSection: String, CaseIterable, Identifiable {
@@ -64,6 +65,8 @@ final class CommandCenterStore {
     var batterySettings = AppPreferences.batteryIndicatorSettings()
     var agentDisplayMode = AppPreferences.agentDisplayMode()
     var menuBarIconStyle = AppPreferences.menuBarIconStyle()
+    var launchAtLoginEnabled = false
+    var launchAtLoginMessage: String?
     var lidIsClosed: Bool?
     var lastLidTransitionAt: Date?
     var scene = CompiledScene(program: "", slots: [])
@@ -152,6 +155,7 @@ final class CommandCenterStore {
             ),
         ]
         recompile()
+        refreshLaunchAtLoginStatus()
         startNativeRuntime()
         startProfileAutomation()
     }
@@ -191,6 +195,48 @@ final class CommandCenterStore {
         guard menuBarIconStyle != style else { return }
         menuBarIconStyle = style
         AppPreferences.saveMenuBarIconStyle(style)
+    }
+
+    var launchAtLoginNeedsApproval: Bool {
+        SMAppService.mainApp.status == .requiresApproval
+    }
+
+    func refreshLaunchAtLoginStatus() {
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            launchAtLoginEnabled = true
+            launchAtLoginMessage = nil
+        case .requiresApproval:
+            launchAtLoginEnabled = true
+            launchAtLoginMessage = "Allow SidePulse in System Settings → General → Login Items."
+        case .notRegistered:
+            launchAtLoginEnabled = false
+            launchAtLoginMessage = nil
+        case .notFound:
+            launchAtLoginEnabled = false
+            launchAtLoginMessage = nil
+        @unknown default:
+            launchAtLoginEnabled = false
+            launchAtLoginMessage = "Startup status is unavailable."
+        }
+    }
+
+    func setLaunchAtLoginEnabled(_ enabled: Bool) {
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+            refreshLaunchAtLoginStatus()
+        } catch {
+            refreshLaunchAtLoginStatus()
+            launchAtLoginMessage = "Couldn’t update startup: \(error.localizedDescription)"
+        }
+    }
+
+    func openLoginItemsSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 
     func updateSelectedProfile(_ update: (inout LightingProfile) -> Void) {

@@ -312,11 +312,37 @@ struct SignalModeControl: View {
                     .pickerStyle(.menu)
                 }
 
+                Toggle("Start at login", isOn: Binding(
+                    get: { store.launchAtLoginEnabled },
+                    set: { store.setLaunchAtLoginEnabled($0) }
+                ))
+                .font(.caption)
+                .toggleStyle(.switch)
+
+                if let message = store.launchAtLoginMessage {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(message)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                        if store.launchAtLoginNeedsApproval {
+                            Button("Open Login Items") {
+                                store.openLoginItemsSettings()
+                            }
+                            .font(.caption2.weight(.semibold))
+                            .buttonStyle(.link)
+                        }
+                    }
+                }
+
             }
-            .frame(width: 240)
+            .frame(width: 270)
         }
         .padding(18)
         .glassEffect(.regular.tint(.cyan.opacity(0.06)), in: .rect(cornerRadius: 22))
+        .onAppear {
+            store.refreshLaunchAtLoginStatus()
+        }
     }
 }
 

@@ -45,6 +45,7 @@ private final class MenuBarIconAnimator: ObservableObject {
 
 private struct SidePulseMenuBarIcon: View {
     @Bindable var store: CommandCenterStore
+    @Environment(\.colorScheme) private var colorScheme
     let animationTick: Int
 
     var body: some View {
@@ -60,14 +61,15 @@ private struct SidePulseMenuBarIcon: View {
         ).frame(at: elapsed)
         let image = MenuBarIconRenderer.image(
             style: store.menuBarIconStyle,
-            colors: frame.colors
+            colors: frame.colors,
+            usesDarkBacking: colorScheme == .light
         )
 
         Image(nsImage: image)
             .renderingMode(.original)
             .frame(width: MenuBarIconRenderer.size.width, height: MenuBarIconRenderer.size.height)
-            .accessibilityLabel("SidePulse, \(store.aggregateState.title), \(store.menuBarIconStyle.title)")
-            .help("SidePulse · \(store.aggregateState.title)")
+            .accessibilityLabel("SidePulse, \(store.agents.count) sessions, \(store.menuBarIconStyle.title)")
+            .help("SidePulse · \(store.agents.count) session\(store.agents.count == 1 ? "" : "s")")
     }
 }
 
@@ -76,7 +78,8 @@ private enum MenuBarIconRenderer {
 
     static func image(
         style: MenuBarIconStyle,
-        colors: [LEDProgramColor]
+        colors: [LEDProgramColor],
+        usesDarkBacking: Bool
     ) -> NSImage {
         renderedImage { bounds in
             let groups = MenuBarDotLayout.sourceIndices(
@@ -91,6 +94,7 @@ private enum MenuBarIconRenderer {
                 colors: dotColors,
                 diameter: style == .horizontalEight ? 2.6 : 4,
                 spacing: style == .horizontalEight ? 0.65 : 1.5,
+                usesDarkBacking: usesDarkBacking,
                 in: bounds
             )
         }
@@ -112,6 +116,7 @@ private enum MenuBarIconRenderer {
         colors: [LEDProgramColor],
         diameter: CGFloat,
         spacing: CGFloat,
+        usesDarkBacking: Bool,
         in bounds: NSRect
     ) {
         let totalLength = CGFloat(colors.count) * diameter
@@ -129,9 +134,15 @@ private enum MenuBarIconRenderer {
             xRadius: pillRect.height / 2,
             yRadius: pillRect.height / 2
         )
-        NSColor.white.withAlphaComponent(0.92).setFill()
+        let backingColor = usesDarkBacking
+            ? NSColor.black.withAlphaComponent(0.84)
+            : NSColor.white.withAlphaComponent(0.92)
+        backingColor.setFill()
         pill.fill()
-        NSColor.black.withAlphaComponent(0.16).setStroke()
+        (usesDarkBacking
+            ? NSColor.white.withAlphaComponent(0.16)
+            : NSColor.black.withAlphaComponent(0.16)
+        ).setStroke()
         pill.lineWidth = 0.45
         pill.stroke()
 
@@ -143,27 +154,33 @@ private enum MenuBarIconRenderer {
                 width: diameter,
                 height: diameter
             )
-            drawDot(in: rect, color: colors[index])
+            drawDot(
+                in: rect,
+                color: colors[index],
+                usesDarkBacking: usesDarkBacking
+            )
         }
     }
 
     private static func drawDot(
         in rect: NSRect,
-        color: LEDProgramColor
+        color: LEDProgramColor,
+        usesDarkBacking: Bool
     ) {
-        let active = color.peak > 0.004
-        let fill = active
-            ? NSColor(
-                srgbRed: color.red,
-                green: color.green,
-                blue: color.blue,
-                alpha: 1
-            )
-            : NSColor.black.withAlphaComponent(0.16)
+        guard color.peak > 0.004 else { return }
+        let fill = NSColor(
+            srgbRed: color.red,
+            green: color.green,
+            blue: color.blue,
+            alpha: 1
+        )
         fill.setFill()
         let path = NSBezierPath(ovalIn: rect)
         path.fill()
-        NSColor.black.withAlphaComponent(active ? 0.28 : 0.18).setStroke()
+        (usesDarkBacking
+            ? NSColor.white.withAlphaComponent(0.22)
+            : NSColor.black.withAlphaComponent(0.28)
+        ).setStroke()
         path.lineWidth = 0.35
         path.stroke()
     }
@@ -179,10 +196,65 @@ struct SidePulseMenuBarView: View {
                 Image(systemName: "lightbulb.led.wide.fill").foregroundStyle(.cyan)
                 Text("SidePulse").font(.headline)
                 Spacer()
-                Text(store.aggregateState.title)
-                    .font(.caption.weight(.semibold))
+                Text("\(store.agents.count) session\(store.agents.count == 1 ? "" : "s")")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            HStack(alignment: .top, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("LIVE ARRAY")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.tertiary)
+                    MenuBarPhysicalArrayView(store: store)
+                }
+                .frame(width: 64, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("AGENT TIMELINE")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                        Text(store.agentDisplayMode == .simple ? "ONE SIGNAL" : "PER AGENT")
+                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if store.agents.isEmpty {
+                        Label("No detected sessions", systemImage: "moon.stars")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 6) {
+                                ForEach(store.agents) { agent in
+                                    Button {
+                                        if agent.openURL == nil {
+                                            openWindow(id: "command-center")
+                                            NSApp.activate(ignoringOtherApps: true)
+                                        }
+                                        store.selectAgent(agent)
+                                    } label: {
+                                        MenuBarAgentRow(
+                                            agent: agent,
+                                            color: Color(hex: store.selectedProfile.style(for: agent.state).colorHex)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Open \(agent.name)")
+                                }
+                            }
+                        }
+                        .scrollIndicators(.hidden)
+                        .frame(height: min(314, max(64, CGFloat(store.agents.count) * 58)))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
 
             Picker("Signal Mode", selection: Binding(
                 get: { store.agentDisplayMode },
@@ -212,82 +284,28 @@ struct SidePulseMenuBarView: View {
                 .frame(width: 150)
             }
 
-            HStack(alignment: .top, spacing: 14) {
-                VStack(spacing: 7) {
-                    ForEach(store.scene.slots.sorted(by: { $0.index > $1.index })) { slot in
-                        HStack(spacing: 7) {
-                            Text("\(slot.index + 1)")
-                                .font(.caption2.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .frame(width: 12, alignment: .trailing)
-                            Circle().fill(slotColor(slot)).frame(width: 15, height: 15)
-                        }
-                    }
-                }
-                if store.agentDisplayMode == .simple {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("ONE SIGNAL · FULL ARRAY")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                        HStack(spacing: 9) {
-                            Image(systemName: store.aggregateState.symbol)
-                                .font(.title3)
-                                .frame(width: 24)
-                            Text(store.aggregateState.title)
-                                .font(.headline)
-                        }
-                        Text("Highest-priority state across \(store.agents.count) detected session\(store.agents.count == 1 ? "" : "s").")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("Failure → Approval → Thinking → Done")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
-                        Text("Tool activity is included in Thinking.")
+            VStack(alignment: .leading, spacing: 5) {
+                Toggle("Start SidePulse at login", isOn: Binding(
+                    get: { store.launchAtLoginEnabled },
+                    set: { store.setLaunchAtLoginEnabled($0) }
+                ))
+                .toggleStyle(.switch)
+                if let message = store.launchAtLoginMessage {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(message)
                             .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("PHYSICAL ARRAY · TOP TO BOTTOM")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                        if store.scene.placementsTopToBottom.isEmpty {
-                            Text("No sessions on the array · lights off")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(store.scene.placementsTopToBottom) { placement in
-                                Button {
-                                    if placement.agent.openURL == nil {
-                                        openWindow(id: "command-center")
-                                        NSApp.activate(ignoringOtherApps: true)
-                                    }
-                                    store.selectAgent(placement.agent)
-                                } label: {
-                                    HStack(spacing: 7) {
-                                        Image(systemName: placement.agent.state.symbol)
-                                            .frame(width: 20)
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(placement.agent.name).lineLimit(1)
-                                            Text(placement.rangeLabel)
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    .padding(.vertical, 4)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                        if store.launchAtLoginNeedsApproval {
+                            Button("Open Login Items") {
+                                store.openLoginItemsSettings()
                             }
+                            .font(.caption2.weight(.semibold))
+                            .buttonStyle(.link)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 
-            Divider()
             Button("Open Command Center", systemImage: "slider.horizontal.3") {
                 openWindow(id: "command-center")
                 NSApp.activate(ignoringOtherApps: true)
@@ -295,11 +313,97 @@ struct SidePulseMenuBarView: View {
             Button("Quit SidePulse", systemImage: "power") { NSApp.terminate(nil) }
         }
         .padding(14)
-        .frame(width: 370)
+        .frame(width: 480)
+        .onAppear {
+            store.refreshLaunchAtLoginStatus()
+        }
     }
+}
 
-    private func slotColor(_ slot: AgentLEDSlot) -> Color {
-        guard let agent = slot.agent else { return .secondary.opacity(0.15) }
-        return Color(hex: store.selectedProfile.style(for: agent.state).colorHex)
+private struct MenuBarPhysicalArrayView: View {
+    @Bindable var store: CommandCenterStore
+
+    var body: some View {
+        let program = store.device.connected ? store.device.activeProgram : store.scene.program
+        let firmware = LEDFirmwareProgram(program: program, ledCount: store.device.ledCount)
+
+        TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
+            let elapsed = store.device.connected
+                ? store.device.lastWrite.map { max(0, timeline.date.timeIntervalSince($0)) }
+                    ?? timeline.date.timeIntervalSinceReferenceDate
+                : timeline.date.timeIntervalSinceReferenceDate
+            let frame = firmware.frame(at: elapsed)
+
+            VStack(spacing: 6) {
+                ForEach(Array(frame.colors.indices.reversed()), id: \.self) { index in
+                    HStack(spacing: 6) {
+                        Text("\(index + 1)")
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 11, alignment: .trailing)
+                        let output = frame.colors[index]
+                        let color = Color(
+                            .sRGB,
+                            red: output.red,
+                            green: output.green,
+                            blue: output.blue,
+                            opacity: 1
+                        )
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(color)
+                            .shadow(color: color.opacity(min(0.8, output.peak)), radius: 4)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .stroke(.white.opacity(0.14), lineWidth: 0.6)
+                            }
+                            .frame(width: 18, height: 18)
+                    }
+                }
+            }
+            .padding(8)
+            .background(.black.opacity(0.92), in: .rect(cornerRadius: 11))
+            .accessibilityLabel("Live SidePulse array, LED \(frame.colors.count) at top through LED 1 at bottom")
+        }
+    }
+}
+
+private struct MenuBarAgentRow: View {
+    let agent: AgentSession
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: agent.state.symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 30, height: 30)
+                .background(color.opacity(0.12), in: .rect(cornerRadius: 9))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(agent.name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(agent.provider.title)
+                    Text("·")
+                    Text(agent.project)
+                    Text("·")
+                    Text(agent.updatedAt, style: .relative)
+                        .monospacedDigit()
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: 6)
+            Image(systemName: "arrow.up.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: 50)
+        .contentShape(.rect)
+        .background(color.opacity(0.055), in: .rect(cornerRadius: 12))
     }
 }
