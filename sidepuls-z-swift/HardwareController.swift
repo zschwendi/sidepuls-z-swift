@@ -17,6 +17,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
     private var state: DeviceState
     private var outputEnabled = false
     private var requestedProgram = "off"
+    private var requestedSourceProgram = "off"
     private var lastWrittenProgram: String?
     private var lastProgramStartedAt: Date?
     private var previewGeneration = 0
@@ -59,7 +60,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
             timer = nil
             cancelPreviewLocked()
             cancelDeferredWriteLocked()
-            if outputEnabled { try? writeLocked("off", remember: false) }
+            if outputEnabled { try? writeLocked("off", sourceProgram: "off", remember: false) }
             outputEnabled = false
         }
     }
@@ -85,12 +86,13 @@ final class SidePulseHardwareController: @unchecked Sendable {
             guard enabledChanged || programChanged else { return }
             outputEnabled = enabled
             requestedProgram = calibratedProgram
+            requestedSourceProgram = program
             if !enabled {
                 cancelPreviewLocked()
                 cancelDeferredWriteLocked()
                 if !wasEnabled { return }
                 do {
-                    try writeLocked("off", remember: true)
+                    try writeLocked("off", sourceProgram: "off", remember: true)
                 } catch {
                     recordErrorLocked(error)
                 }
@@ -142,7 +144,11 @@ final class SidePulseHardwareController: @unchecked Sendable {
             let previewPath = state.path
             activePreviewGeneration = generation
             do {
-                try writeLocked(calibratedProgram, remember: false)
+                try writeLocked(
+                    calibratedProgram,
+                    sourceProgram: program,
+                    remember: false
+                )
             } catch {
                 activePreviewGeneration = nil
                 recordErrorLocked(error)
@@ -153,8 +159,13 @@ final class SidePulseHardwareController: @unchecked Sendable {
                 activePreviewGeneration = nil
                 guard state.connected, state.path == previewPath else { return }
                 let restore = outputEnabled ? requestedProgram : "off"
+                let restoreSource = outputEnabled ? requestedSourceProgram : "off"
                 do {
-                    try writeLocked(restore, remember: outputEnabled)
+                    try writeLocked(
+                        restore,
+                        sourceProgram: restoreSource,
+                        remember: outputEnabled
+                    )
                 } catch {
                     recordErrorLocked(error)
                 }
@@ -167,6 +178,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
         var next = discovered ?? kind.disconnectedState
         if next.connected, next.path == state.path {
             next.activeProgram = state.activeProgram
+            next.sourceProgram = state.sourceProgram
             next.lastWrite = state.lastWrite
             next.lastError = state.lastError
         }
@@ -196,7 +208,11 @@ final class SidePulseHardwareController: @unchecked Sendable {
         }
         guard state.connected, force || requestedProgram != lastWrittenProgram else { return }
         do {
-            try writeLocked(requestedProgram, remember: true)
+            try writeLocked(
+                requestedProgram,
+                sourceProgram: requestedSourceProgram,
+                remember: true
+            )
         } catch {
             recordErrorLocked(error)
         }
@@ -241,7 +257,11 @@ final class SidePulseHardwareController: @unchecked Sendable {
         deferredWriteDeadline = nil
     }
 
-    private func writeLocked(_ program: String, remember: Bool) throws {
+    private func writeLocked(
+        _ program: String,
+        sourceProgram: String,
+        remember: Bool
+    ) throws {
         guard !outputDisabledByEnvironment else { throw HardwareError.outputDisabledForTest }
         guard state.connected else { throw HardwareError.deviceNotConnected }
         let data = Data(program.utf8)
@@ -254,6 +274,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
             encoding: .utf8
         )
         state.activeProgram = program
+        state.sourceProgram = sourceProgram
         if remember {
             lastWrittenProgram = program
             lastProgramStartedAt = .now

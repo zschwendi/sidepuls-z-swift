@@ -565,6 +565,7 @@ struct DeviceState: Equatable, Sendable {
     var ledCount = 8
     var connected = false
     var activeProgram = "off"
+    var sourceProgram = "off"
     var lastWrite: Date?
     var lastError: String?
 }

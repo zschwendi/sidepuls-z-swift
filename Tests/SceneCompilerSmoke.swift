@@ -334,6 +334,19 @@ enum SceneCompilerSmoke {
         )
         precondition(LEDProgramOutputCalibration.scalingBrightness(in: "off", by: 0.4) == "off")
         precondition(
+            LEDProgramOutputCalibration.settingBrightness(
+                in: "brightness 73\n0:#00B300;1:#000000",
+                to: 255
+            ) == "brightness 255\n0:#00B300;1:#000000"
+        )
+        precondition(
+            LEDProgramOutputCalibration.settingBrightness(
+                in: "0:#FFFFFF;1:#FFFFFF",
+                to: 255
+            ) == "brightness 255\n0:#FFFFFF;1:#FFFFFF"
+        )
+        precondition(LEDProgramOutputCalibration.settingBrightness(in: "off", to: 255) == "off")
+        precondition(
             LEDProgramOutputCalibration.applying(
                 to: "brightness 183\n0:#6A1259;1:#000A6A",
                 brightnessScale: 0.4,

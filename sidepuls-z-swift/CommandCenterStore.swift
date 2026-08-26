@@ -173,6 +173,11 @@ final class CommandCenterStore {
         )
     }
 
+    var menuBarIconProgram: String {
+        let program = device.connected ? device.sourceProgram : scene.program
+        return LEDProgramOutputCalibration.settingBrightness(in: program, to: 255)
+    }
+
     var aggregateState: AgentState {
         AgentDisplayPolicy.aggregateState(for: agents, mode: agentDisplayMode)
     }

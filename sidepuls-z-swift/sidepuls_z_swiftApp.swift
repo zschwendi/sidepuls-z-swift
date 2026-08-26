@@ -49,7 +49,7 @@ private struct SidePulseMenuBarIcon: View {
 
     var body: some View {
         let _ = animationTick
-        let program = store.liveProgram
+        let program = store.menuBarIconProgram
         let elapsed = store.device.connected
             ? store.device.lastWrite.map { max(0, Date.now.timeIntervalSince($0)) }
                 ?? Date.now.timeIntervalSinceReferenceDate
