@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 
 @main
@@ -26,7 +27,10 @@ private final class SidePulseMenuBarController: NSObject {
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private let imageCache = MenuBarIconImageCache()
-    private var timer: Timer?
+    private var displayLink: CADisplayLink?
+    private var renderedProgramText = ""
+    private var renderedLEDCount = 0
+    private var renderedProgram: LEDFirmwareProgram?
 
     init(store: CommandCenterStore) {
         self.store = store
@@ -53,14 +57,23 @@ private final class SidePulseMenuBarController: NSObject {
         hostingController.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hostingController
 
-        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.refreshIcon()
-            }
+        if let button = statusItem.button {
+            let displayLink = button.displayLink(
+                target: self,
+                selector: #selector(displayLinkDidFire(_:))
+            )
+            displayLink.preferredFrameRateRange = CAFrameRateRange(
+                minimum: 120,
+                maximum: 120,
+                preferred: 120
+            )
+            displayLink.add(to: .main, forMode: .common)
+            self.displayLink = displayLink
         }
-        timer.tolerance = 0.002
-        self.timer = timer
-        RunLoop.main.add(timer, forMode: .common)
+        refreshIcon()
+    }
+
+    @objc private func displayLinkDidFire(_ displayLink: CADisplayLink) {
         refreshIcon()
     }
 
@@ -76,14 +89,20 @@ private final class SidePulseMenuBarController: NSObject {
     private func refreshIcon() {
         guard let button = statusItem.button else { return }
         let program = store.softwareDisplayProgram
+        let ledCount = store.device.ledCount
+        if renderedProgram == nil
+            || renderedProgramText != program
+            || renderedLEDCount != ledCount
+        {
+            renderedProgramText = program
+            renderedLEDCount = ledCount
+            renderedProgram = LEDFirmwareProgram(program: program, ledCount: ledCount)
+        }
         let elapsed = store.device.connected
             ? store.device.lastWrite.map { max(0, Date.now.timeIntervalSince($0)) }
                 ?? Date.now.timeIntervalSinceReferenceDate
             : Date.now.timeIntervalSinceReferenceDate
-        let frame = LEDFirmwareProgram(
-            program: program,
-            ledCount: store.device.ledCount
-        ).frame(at: elapsed)
+        guard let frame = renderedProgram?.frame(at: elapsed) else { return }
         let image = imageCache.image(
             style: store.menuBarIconStyle,
             colors: frame.colors
@@ -128,7 +147,7 @@ private final class MenuBarIconImageCache {
             style: style,
             components: quantizedColors.flatMap { color in
                 [color.red, color.green, color.blue].map {
-                    UInt8(max(0, min(63, Int(($0 * 63).rounded()))))
+                    UInt8(max(0, min(255, Int(($0 * 255).rounded()))))
                 }
             }
         )
@@ -136,7 +155,7 @@ private final class MenuBarIconImageCache {
 
         let image = MenuBarIconRenderer.image(style: style, dotColors: quantizedColors)
         images[key] = image
-        if images.count > 384 {
+        if images.count > 768 {
             images = [key: image]
         }
         return image
@@ -144,8 +163,8 @@ private final class MenuBarIconImageCache {
 
     private static func quantized(_ color: LEDProgramColor) -> LEDProgramColor {
         func component(_ value: Double) -> Double {
-            let bucket = max(0, min(63, Int((value * 63).rounded())))
-            return Double(bucket) / 63
+            let bucket = max(0, min(255, Int((value * 255).rounded())))
+            return Double(bucket) / 255
         }
 
         return LEDProgramColor(
