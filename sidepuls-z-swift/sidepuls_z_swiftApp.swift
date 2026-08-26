@@ -129,9 +129,9 @@ private enum MenuBarIconRenderer {
             xRadius: pillRect.height / 2,
             yRadius: pillRect.height / 2
         )
-        NSColor.black.withAlphaComponent(0.92).setFill()
+        NSColor.white.withAlphaComponent(0.94).setFill()
         pill.fill()
-        NSColor.white.withAlphaComponent(0.2).setStroke()
+        NSColor.black.withAlphaComponent(0.16).setStroke()
         pill.lineWidth = 0.45
         pill.stroke()
 
@@ -152,10 +152,11 @@ private enum MenuBarIconRenderer {
         color: LEDProgramColor
     ) {
         guard color.peak > 0.004 else { return }
+        let brightnessBoost = 2.2
         let fill = NSColor(
-            srgbRed: color.red,
-            green: color.green,
-            blue: color.blue,
+            srgbRed: min(1, color.red * brightnessBoost),
+            green: min(1, color.green * brightnessBoost),
+            blue: min(1, color.blue * brightnessBoost),
             alpha: 1
         )
         fill.setFill()
