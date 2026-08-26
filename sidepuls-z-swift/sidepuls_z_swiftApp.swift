@@ -1,54 +1,80 @@
 import AppKit
-import Combine
 import SwiftUI
 
 @main
 struct SidePulseCommandCenterApp: App {
-    @State private var store = CommandCenterStore()
-    @StateObject private var menuBarIconAnimator = MenuBarIconAnimator()
+    @State private var store: CommandCenterStore
+    private let menuBarController: SidePulseMenuBarController
+
+    init() {
+        let store = CommandCenterStore()
+        _store = State(initialValue: store)
+        menuBarController = SidePulseMenuBarController(store: store)
+    }
 
     var body: some Scene {
         WindowGroup("SidePulse Command Center", id: "command-center") {
             ContentView(store: store)
         }
         .defaultSize(width: 1_180, height: 780)
-
-        MenuBarExtra {
-            SidePulseMenuBarView(store: store)
-        } label: {
-            SidePulseMenuBarIcon(
-                store: store,
-                animationTick: menuBarIconAnimator.tick
-            )
-        }
-        .menuBarExtraStyle(.window)
     }
 }
 
 @MainActor
-private final class MenuBarIconAnimator: ObservableObject {
-    @Published private(set) var tick = 0
+private final class SidePulseMenuBarController: NSObject {
+    private let store: CommandCenterStore
+    private let statusItem: NSStatusItem
+    private let popover = NSPopover()
+    private let imageCache = MenuBarIconImageCache()
     private var timer: Timer?
 
-    init() {
-        let timer = Timer(timeInterval: 1.0 / 12.0, repeats: true) { [weak self] _ in
+    init(store: CommandCenterStore) {
+        self.store = store
+        statusItem = NSStatusBar.system.statusItem(withLength: 32)
+        super.init()
+
+        if let button = statusItem.button {
+            button.target = self
+            button.action = #selector(togglePopover(_:))
+            button.imagePosition = .imageOnly
+            button.setAccessibilityLabel("SidePulse")
+        }
+
+        popover.behavior = .transient
+        popover.animates = false
+        let hostingController = NSHostingController(
+            rootView: AnyView(
+                SidePulseMenuBarView(
+                    store: store,
+                    openCommandCenter: { [weak self] in self?.openCommandCenter() }
+                )
+            )
+        )
+        hostingController.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = hostingController
+
+        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
-                self.tick = (self.tick + 1) % 120
+                self?.refreshIcon()
             }
         }
-        timer.tolerance = 0.012
+        timer.tolerance = 0.002
         self.timer = timer
         RunLoop.main.add(timer, forMode: .common)
+        refreshIcon()
     }
-}
 
-private struct SidePulseMenuBarIcon: View {
-    @Bindable var store: CommandCenterStore
-    let animationTick: Int
+    @objc private func togglePopover(_ sender: NSStatusBarButton) {
+        if popover.isShown {
+            popover.performClose(sender)
+        } else {
+            popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
+        }
+    }
 
-    var body: some View {
-        let _ = animationTick
+    private func refreshIcon() {
+        guard let button = statusItem.button else { return }
         let program = store.softwareDisplayProgram
         let elapsed = store.device.connected
             ? store.device.lastWrite.map { max(0, Date.now.timeIntervalSince($0)) }
@@ -58,16 +84,75 @@ private struct SidePulseMenuBarIcon: View {
             program: program,
             ledCount: store.device.ledCount
         ).frame(at: elapsed)
-        let image = MenuBarIconRenderer.image(
+        let image = imageCache.image(
             style: store.menuBarIconStyle,
             colors: frame.colors
         )
+        if button.image !== image {
+            button.image = image
+        }
+        let toolTip = "SidePulse · \(store.agents.count) session\(store.agents.count == 1 ? "" : "s")"
+        if button.toolTip != toolTip {
+            button.toolTip = toolTip
+        }
+    }
 
-        Image(nsImage: image)
-            .renderingMode(.original)
-            .frame(width: MenuBarIconRenderer.size.width, height: MenuBarIconRenderer.size.height)
-            .accessibilityLabel("SidePulse, \(store.agents.count) sessions, \(store.menuBarIconStyle.title)")
-            .help("SidePulse · \(store.agents.count) session\(store.agents.count == 1 ? "" : "s")")
+    private func openCommandCenter() {
+        popover.performClose(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0.title == "Command Center" }) {
+            window.deminiaturize(nil)
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            NSApp.sendAction(Selector(("newWindow:")), to: nil, from: nil)
+        }
+    }
+}
+
+@MainActor
+private final class MenuBarIconImageCache {
+    private struct Key: Hashable {
+        var style: MenuBarIconStyle
+        var components: [UInt8]
+    }
+
+    private var images: [Key: NSImage] = [:]
+
+    func image(
+        style: MenuBarIconStyle,
+        colors: [LEDProgramColor]
+    ) -> NSImage {
+        let dotColors = MenuBarDotLayout.colors(for: style, sourceColors: colors)
+        let quantizedColors = dotColors.map(Self.quantized)
+        let key = Key(
+            style: style,
+            components: quantizedColors.flatMap { color in
+                [color.red, color.green, color.blue].map {
+                    UInt8(max(0, min(63, Int(($0 * 63).rounded()))))
+                }
+            }
+        )
+        if let image = images[key] { return image }
+
+        let image = MenuBarIconRenderer.image(style: style, dotColors: quantizedColors)
+        images[key] = image
+        if images.count > 384 {
+            images = [key: image]
+        }
+        return image
+    }
+
+    private static func quantized(_ color: LEDProgramColor) -> LEDProgramColor {
+        func component(_ value: Double) -> Double {
+            let bucket = max(0, min(63, Int((value * 63).rounded())))
+            return Double(bucket) / 63
+        }
+
+        return LEDProgramColor(
+            red: component(color.red),
+            green: component(color.green),
+            blue: component(color.blue)
+        )
     }
 }
 
@@ -76,17 +161,9 @@ private enum MenuBarIconRenderer {
 
     static func image(
         style: MenuBarIconStyle,
-        colors: [LEDProgramColor]
+        dotColors: [LEDProgramColor]
     ) -> NSImage {
         renderedImage { bounds in
-            let groups = MenuBarDotLayout.sourceIndices(
-                for: style,
-                ledCount: colors.count
-            )
-            let dotColors = groups.map { indices in
-                indices.compactMap { colors.indices.contains($0) ? colors[$0] : nil }
-                    .max(by: { $0.peak < $1.peak }) ?? .black
-            }
             drawHorizontalDots(
                 colors: dotColors,
                 diameter: style == .horizontalEight ? 2.6 : 4.2,
@@ -167,7 +244,7 @@ private enum MenuBarIconRenderer {
 
 struct SidePulseMenuBarView: View {
     @Bindable var store: CommandCenterStore
-    @Environment(\.openWindow) private var openWindow
+    let openCommandCenter: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -211,8 +288,7 @@ struct SidePulseMenuBarView: View {
                                 ForEach(store.agents) { agent in
                                     Button {
                                         if agent.openURL == nil {
-                                            openWindow(id: "command-center")
-                                            NSApp.activate(ignoringOtherApps: true)
+                                            openCommandCenter()
                                         }
                                         store.selectAgent(agent)
                                     } label: {
@@ -313,8 +389,7 @@ struct SidePulseMenuBarView: View {
             }
 
             Button("Open Command Center", systemImage: "slider.horizontal.3") {
-                openWindow(id: "command-center")
-                NSApp.activate(ignoringOtherApps: true)
+                openCommandCenter()
             }
             Button("Quit SidePulse", systemImage: "power") { NSApp.terminate(nil) }
         }

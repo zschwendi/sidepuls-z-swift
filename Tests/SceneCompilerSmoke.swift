@@ -39,6 +39,23 @@ enum SceneCompilerSmoke {
             [0, 1], [2, 3], [4, 5], [6, 7],
         ])
         precondition(MenuBarDotLayout.sourceIndices(for: .horizontalFour, ledCount: 2) == [[0], [1]])
+        let menuBarSourceColors = [
+            LEDProgramColor(red: 1, green: 0, blue: 0),
+            LEDProgramColor.black,
+            LEDProgramColor(red: 0, green: 1, blue: 0),
+            LEDProgramColor(red: 0, green: 0, blue: 1),
+        ]
+        let mirroredMenuBarColors = MenuBarDotLayout.colors(
+            for: .horizontalFour,
+            sourceColors: menuBarSourceColors
+        )
+        precondition(mirroredMenuBarColors == menuBarSourceColors)
+        let blendedMenuBarColors = MenuBarDotLayout.colors(
+            for: .horizontalFour,
+            sourceColors: menuBarSourceColors + Array(repeating: .black, count: 4)
+        )
+        precondition(blendedMenuBarColors[0] == LEDProgramColor(red: 0.5, green: 0, blue: 0))
+        precondition(blendedMenuBarColors[1] == LEDProgramColor(red: 0, green: 0.5, blue: 0.5))
         precondition(SidePulseHardwareController.refreshInterval(for: "off") == nil)
         precondition(SidePulseHardwareController.refreshInterval(for: "0:#00FF00") == 15)
         precondition(

@@ -411,7 +411,7 @@ struct LEDDeckView: View {
                 }
 
                 HStack(alignment: .center, spacing: 28) {
-                    TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
                         let elapsed = store.device.lastWrite.map {
                             max(0, timeline.date.timeIntervalSince($0))
                         } ?? 0

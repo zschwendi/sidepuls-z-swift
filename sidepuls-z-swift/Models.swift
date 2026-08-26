@@ -171,6 +171,25 @@ enum MenuBarDotLayout {
             }
         }
     }
+
+    static func colors(
+        for style: MenuBarIconStyle,
+        sourceColors: [LEDProgramColor]
+    ) -> [LEDProgramColor] {
+        sourceIndices(for: style, ledCount: sourceColors.count).map { indices in
+            let colors = indices.compactMap { index in
+                sourceColors.indices.contains(index) ? sourceColors[index] : nil
+            }
+            guard !colors.isEmpty else { return .black }
+
+            let divisor = Double(colors.count)
+            return LEDProgramColor(
+                red: colors.reduce(0) { $0 + $1.red } / divisor,
+                green: colors.reduce(0) { $0 + $1.green } / divisor,
+                blue: colors.reduce(0) { $0 + $1.blue } / divisor
+            )
+        }
+    }
 }
 
 struct AgentSession: Identifiable, Codable, Hashable, Sendable {
