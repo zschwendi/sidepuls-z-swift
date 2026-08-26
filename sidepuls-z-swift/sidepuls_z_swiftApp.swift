@@ -180,7 +180,7 @@ struct SidePulseMenuBarView: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack(alignment: .top, spacing: 18) {
+            HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("LIVE ARRAY")
                         .font(.caption2.weight(.bold))
@@ -264,6 +264,7 @@ struct SidePulseMenuBarView: View {
                     step: 0.01
                 )
                 .tint(.purple)
+                .controlSize(.small)
                 .accessibilityLabel("Max Brightness")
                 .accessibilityValue("\(Int((store.universalBrightness * 100).rounded())) percent")
                 Text("Dims every profile, animation, preview, and battery signal.")
@@ -286,7 +287,7 @@ struct SidePulseMenuBarView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(width: 150)
+                .frame(width: 120)
             }
 
             VStack(alignment: .leading, spacing: 5) {
@@ -317,8 +318,8 @@ struct SidePulseMenuBarView: View {
             }
             Button("Quit SidePulse", systemImage: "power") { NSApp.terminate(nil) }
         }
-        .padding(14)
-        .frame(width: 480)
+        .padding(12)
+        .frame(width: 280)
         .onAppear {
             store.refreshLaunchAtLoginStatus()
         }
