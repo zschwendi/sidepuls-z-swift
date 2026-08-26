@@ -50,12 +50,36 @@ enum SceneCompilerSmoke {
             sourceColors: menuBarSourceColors
         )
         precondition(mirroredMenuBarColors == menuBarSourceColors)
-        let blendedMenuBarColors = MenuBarDotLayout.colors(
+        let condensedMenuBarColors = MenuBarDotLayout.colors(
             for: .horizontalFour,
             sourceColors: menuBarSourceColors + Array(repeating: .black, count: 4)
         )
-        precondition(blendedMenuBarColors[0] == LEDProgramColor(red: 0.5, green: 0, blue: 0))
-        precondition(blendedMenuBarColors[1] == LEDProgramColor(red: 0, green: 0.5, blue: 0.5))
+        precondition(condensedMenuBarColors[0] == LEDProgramColor(red: 1, green: 0, blue: 0))
+        precondition(condensedMenuBarColors[1] == LEDProgramColor(red: 0, green: 1, blue: 0))
+        let emphasizedSequence = MenuBarSequentialEmphasis.colors([
+            LEDProgramColor(red: 1, green: 0, blue: 0),
+            LEDProgramColor(red: 0.6, green: 0, blue: 0),
+            LEDProgramColor(red: 0.2, green: 0, blue: 0),
+        ])
+        precondition(emphasizedSequence[0] == LEDProgramColor(red: 1, green: 0, blue: 0))
+        precondition(emphasizedSequence[1] == .black)
+        precondition(emphasizedSequence[2] == .black)
+        let emphasizedShoulder = MenuBarSequentialEmphasis.colors([
+            LEDProgramColor(red: 1, green: 0, blue: 0),
+            LEDProgramColor(red: 0.9, green: 0, blue: 0),
+        ])
+        precondition(emphasizedShoulder[1] == .black, "Sequential icon must not retain a dim worm tail")
+        let emphasizedHandoff = MenuBarSequentialEmphasis.colors([
+            LEDProgramColor(red: 1, green: 0, blue: 0),
+            LEDProgramColor(red: 1, green: 0, blue: 0),
+            LEDProgramColor(red: 0.8, green: 0, blue: 0),
+        ])
+        precondition(emphasizedHandoff[0].peak == 1 && emphasizedHandoff[1].peak == 1)
+        precondition(emphasizedHandoff[2] == .black)
+        let emphasizedSolid = MenuBarSequentialEmphasis.colors(
+            Array(repeating: LEDProgramColor(red: 0, green: 0.8, blue: 0), count: 4)
+        )
+        precondition(emphasizedSolid.allSatisfy { $0 == LEDProgramColor(red: 0, green: 0.8, blue: 0) })
         precondition(SidePulseHardwareController.refreshInterval(for: "off") == nil)
         precondition(SidePulseHardwareController.refreshInterval(for: "0:#00FF00") == 15)
         precondition(

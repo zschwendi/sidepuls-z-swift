@@ -390,10 +390,6 @@ struct LEDDeckView: View {
     @Bindable var store: CommandCenterStore
 
     var body: some View {
-        let firmware = LEDFirmwareProgram(
-            program: store.connectedSoftwareDisplayProgram,
-            ledCount: store.device.ledCount
-        )
         GlassEffectContainer(spacing: 14) {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
@@ -411,22 +407,20 @@ struct LEDDeckView: View {
                 }
 
                 HStack(alignment: .center, spacing: 28) {
-                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-                        let elapsed = store.device.lastWrite.map {
-                            max(0, timeline.date.timeIntervalSince($0))
-                        } ?? 0
-                        let frame = firmware.frame(at: elapsed)
-
-                        VStack(spacing: 12) {
-                            ForEach(store.scene.slots.sorted(by: { $0.index > $1.index })) { slot in
-                                LEDCell(
-                                    slot: slot,
-                                    outputColor: frame.colors.indices.contains(slot.index)
-                                        ? frame.colors[slot.index]
-                                        : .black
-                                )
-                            }
-                        }
+                    DisplayLinkedLEDArray(
+                        program: store.connectedSoftwareDisplayProgram,
+                        ledCount: store.device.ledCount,
+                        clockOrigin: store.device.lastWrite,
+                        style: .commandCenter
+                    )
+                        .frame(
+                            width: LEDArrayPreviewStyle.commandCenter.size(
+                                ledCount: store.device.ledCount
+                            ).width,
+                            height: LEDArrayPreviewStyle.commandCenter.size(
+                                ledCount: store.device.ledCount
+                            ).height
+                        )
                         .padding(.horizontal, 20)
                         .padding(.vertical, 22)
                         .frame(width: 126)
@@ -435,7 +429,6 @@ struct LEDDeckView: View {
                             RoundedRectangle(cornerRadius: 30, style: .continuous)
                                 .stroke(.white.opacity(0.1), lineWidth: 1)
                         }
-                    }
 
                     VStack(alignment: .leading, spacing: 12) {
                         Text(store.agentDisplayMode == .simple

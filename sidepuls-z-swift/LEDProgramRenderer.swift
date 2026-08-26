@@ -138,6 +138,10 @@ struct LEDFirmwareProgram: Equatable, Sendable {
     private let repeats: Bool
     private let cycleDuration: TimeInterval
 
+    var isRepeatingAnimation: Bool {
+        repeats && cycleDuration > 0
+    }
+
     init(program: String, ledCount: Int) {
         let count = max(1, min(8, ledCount))
         self.ledCount = count

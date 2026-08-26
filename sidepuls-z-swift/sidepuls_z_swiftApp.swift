@@ -105,7 +105,8 @@ private final class SidePulseMenuBarController: NSObject {
         guard let frame = renderedProgram?.frame(at: elapsed) else { return }
         let image = imageCache.image(
             style: store.menuBarIconStyle,
-            colors: frame.colors
+            colors: frame.colors,
+            emphasizesSequence: renderedProgram?.isRepeatingAnimation == true
         )
         if button.image !== image {
             button.image = image
@@ -139,9 +140,13 @@ private final class MenuBarIconImageCache {
 
     func image(
         style: MenuBarIconStyle,
-        colors: [LEDProgramColor]
+        colors: [LEDProgramColor],
+        emphasizesSequence: Bool
     ) -> NSImage {
-        let dotColors = MenuBarDotLayout.colors(for: style, sourceColors: colors)
+        var dotColors = MenuBarDotLayout.colors(for: style, sourceColors: colors)
+        if emphasizesSequence {
+            dotColors = MenuBarSequentialEmphasis.colors(dotColors)
+        }
         let quantizedColors = dotColors.map(Self.quantized)
         let key = Key(
             style: style,
@@ -425,45 +430,23 @@ private struct MenuBarPhysicalArrayView: View {
 
     var body: some View {
         let program = store.softwareDisplayProgram
-        let firmware = LEDFirmwareProgram(program: program, ledCount: store.device.ledCount)
 
-        TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
-            let elapsed = store.device.connected
-                ? store.device.lastWrite.map { max(0, timeline.date.timeIntervalSince($0)) }
-                    ?? timeline.date.timeIntervalSinceReferenceDate
-                : timeline.date.timeIntervalSinceReferenceDate
-            let frame = firmware.frame(at: elapsed)
-
-            VStack(spacing: 6) {
-                ForEach(Array(frame.colors.indices.reversed()), id: \.self) { index in
-                    HStack(spacing: 6) {
-                        Text("\(index + 1)")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 11, alignment: .trailing)
-                        let output = frame.colors[index]
-                        let color = Color(
-                            .sRGB,
-                            red: output.red,
-                            green: output.green,
-                            blue: output.blue,
-                            opacity: 1
-                        )
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(color)
-                            .shadow(color: color.opacity(min(0.8, output.peak)), radius: 4)
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .stroke(.white.opacity(0.14), lineWidth: 0.6)
-                            }
-                            .frame(width: 18, height: 18)
-                    }
-                }
-            }
+        DisplayLinkedLEDArray(
+            program: program,
+            ledCount: store.device.ledCount,
+            clockOrigin: store.device.connected ? store.device.lastWrite : nil,
+            style: .menuBar
+        )
+            .frame(
+                width: LEDArrayPreviewStyle.menuBar.size(
+                    ledCount: store.device.ledCount
+                ).width,
+                height: LEDArrayPreviewStyle.menuBar.size(
+                    ledCount: store.device.ledCount
+                ).height
+            )
             .padding(8)
             .background(.black.opacity(0.92), in: .rect(cornerRadius: 11))
-            .accessibilityLabel("Live SidePulse array, LED \(frame.colors.count) at top through LED 1 at bottom")
-        }
     }
 }
 

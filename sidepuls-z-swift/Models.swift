@@ -148,7 +148,7 @@ enum MenuBarIconStyle: String, Codable, CaseIterable, Identifiable, Sendable {
         case .horizontalEight:
             "Show all eight physical LED positions in one compact row."
         case .horizontalFour:
-            "Show four dots, each mirroring one adjacent pair of physical LEDs."
+            "Condense adjacent physical positions into four clear sequential dots."
         }
     }
 }
@@ -181,14 +181,29 @@ enum MenuBarDotLayout {
                 sourceColors.indices.contains(index) ? sourceColors[index] : nil
             }
             guard !colors.isEmpty else { return .black }
-
-            let divisor = Double(colors.count)
-            return LEDProgramColor(
-                red: colors.reduce(0) { $0 + $1.red } / divisor,
-                green: colors.reduce(0) { $0 + $1.green } / divisor,
-                blue: colors.reduce(0) { $0 + $1.blue } / divisor
-            )
+            return colors.max(by: { $0.peak < $1.peak }) ?? .black
         }
+    }
+}
+
+/// Removes the long dim tails that make a sequential status-bar animation read
+/// as a sliding gradient. Full-array and symmetric states remain unchanged
+/// because their dots share the same peak brightness.
+enum MenuBarSequentialEmphasis {
+    static func colors(_ colors: [LEDProgramColor]) -> [LEDProgramColor] {
+        let framePeak = colors.map(\.peak).max() ?? 0
+        guard framePeak > 0.004 else { return colors }
+
+        return colors.map { color in
+            let relativePeak = color.peak / framePeak
+            let emphasis = smoothStep(relativePeak, from: 0.92, to: 0.985)
+            return color.scaled(by: emphasis)
+        }
+    }
+
+    private static func smoothStep(_ value: Double, from lower: Double, to upper: Double) -> Double {
+        let progress = max(0, min(1, (value - lower) / (upper - lower)))
+        return progress * progress * (3 - (2 * progress))
     }
 }
 
