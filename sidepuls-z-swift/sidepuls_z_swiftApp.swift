@@ -89,8 +89,8 @@ private enum MenuBarIconRenderer {
             }
             drawHorizontalDots(
                 colors: dotColors,
-                diameter: style == .horizontalEight ? 2.6 : 4,
-                spacing: style == .horizontalEight ? 0.65 : 1.5,
+                diameter: style == .horizontalEight ? 2.6 : 4.2,
+                spacing: style == .horizontalEight ? 0.65 : 0.7,
                 in: bounds
             )
         }
@@ -116,8 +116,8 @@ private enum MenuBarIconRenderer {
     ) {
         let totalLength = CGFloat(colors.count) * diameter
             + CGFloat(max(0, colors.count - 1)) * spacing
-        let horizontalPadding: CGFloat = colors.count > 4 ? 1.15 : 2.5
-        let verticalPadding: CGFloat = colors.count > 4 ? 2.1 : 1.8
+        let horizontalPadding: CGFloat = colors.count > 4 ? 1.15 : 2
+        let verticalPadding: CGFloat = colors.count > 4 ? 2.1 : 1.65
         let pillRect = NSRect(
             x: bounds.midX - (totalLength + horizontalPadding * 2) / 2,
             y: bounds.midY - (diameter + verticalPadding * 2) / 2,
@@ -129,9 +129,9 @@ private enum MenuBarIconRenderer {
             xRadius: pillRect.height / 2,
             yRadius: pillRect.height / 2
         )
-        NSColor.white.withAlphaComponent(0.94).setFill()
+        NSColor.white.withAlphaComponent(0.46).setFill()
         pill.fill()
-        NSColor.black.withAlphaComponent(0.16).setStroke()
+        NSColor.black.withAlphaComponent(0.1).setStroke()
         pill.lineWidth = 0.45
         pill.stroke()
 
