@@ -166,6 +166,7 @@ enum AppPreferences {
     private static let batteryIndicatorKey = "sidepulse.battery-indicator.v1"
     private static let agentDisplayModeKey = "sidepulse.agent-display-mode.v1"
     private static let menuBarIconStyleKey = "sidepulse.menu-bar-icon-style.v1"
+    private static let universalBrightnessKey = "sidepulse.universal-brightness.v1"
 
     static func liveOutputEnabled(from defaults: UserDefaults = .standard) -> Bool {
         guard defaults.object(forKey: liveOutputKey) != nil else {
@@ -210,6 +211,18 @@ enum AppPreferences {
         to defaults: UserDefaults = .standard
     ) {
         defaults.set(style.rawValue, forKey: menuBarIconStyleKey)
+    }
+
+    static func universalBrightness(from defaults: UserDefaults = .standard) -> Double {
+        guard defaults.object(forKey: universalBrightnessKey) != nil else { return 1 }
+        return max(0, min(1, defaults.double(forKey: universalBrightnessKey)))
+    }
+
+    static func saveUniversalBrightness(
+        _ brightness: Double,
+        to defaults: UserDefaults = .standard
+    ) {
+        defaults.set(max(0, min(1, brightness)), forKey: universalBrightnessKey)
     }
 
     static func batteryIndicatorSettings(

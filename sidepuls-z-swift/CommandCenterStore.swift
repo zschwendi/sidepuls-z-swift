@@ -65,6 +65,7 @@ final class CommandCenterStore {
     var batterySettings = AppPreferences.batteryIndicatorSettings()
     var agentDisplayMode = AppPreferences.agentDisplayMode()
     var menuBarIconStyle = AppPreferences.menuBarIconStyle()
+    var universalBrightness = AppPreferences.universalBrightness()
     var launchAtLoginEnabled = false
     var launchAtLoginMessage: String?
     var lidIsClosed: Bool?
@@ -164,6 +165,14 @@ final class CommandCenterStore {
         profiles.first(where: { $0.id == selectedProfileID }) ?? .factoryDefault
     }
 
+    var liveProgram: String {
+        if device.connected { return device.activeProgram }
+        return LEDProgramOutputCalibration.scalingBrightness(
+            in: scene.program,
+            by: universalBrightness
+        )
+    }
+
     var aggregateState: AgentState {
         AgentDisplayPolicy.aggregateState(for: agents, mode: agentDisplayMode)
     }
@@ -195,6 +204,14 @@ final class CommandCenterStore {
         guard menuBarIconStyle != style else { return }
         menuBarIconStyle = style
         AppPreferences.saveMenuBarIconStyle(style)
+    }
+
+    func setUniversalBrightness(_ brightness: Double) {
+        let clamped = max(0, min(1, brightness))
+        guard abs(universalBrightness - clamped) > 0.000_1 else { return }
+        universalBrightness = clamped
+        AppPreferences.saveUniversalBrightness(clamped)
+        syncHardwareOutput()
     }
 
     var launchAtLoginNeedsApproval: Bool {
@@ -411,8 +428,14 @@ final class CommandCenterStore {
             allocator: &dotPreviewAllocator,
             ledCount: SidePulseDeviceKind.dot.ledCount
         )
-        proHardware?.preview(program: proPreview.program)
-        dotHardware?.preview(program: dotPreview.program)
+        proHardware?.preview(
+            program: proPreview.program,
+            brightnessScale: universalBrightness
+        )
+        dotHardware?.preview(
+            program: dotPreview.program,
+            brightnessScale: universalBrightness
+        )
     }
 
     func updateBatterySettings(_ update: (inout BatteryIndicatorSettings) -> Void) {
@@ -441,8 +464,16 @@ final class CommandCenterStore {
             chargeFraction: chargeFraction,
             ledCount: SidePulseDeviceKind.dot.ledCount
         )
-        proHardware?.preview(program: proTransition.program, duration: proTransition.duration)
-        dotHardware?.preview(program: dotTransition.program, duration: dotTransition.duration)
+        proHardware?.preview(
+            program: proTransition.program,
+            brightnessScale: universalBrightness,
+            duration: proTransition.duration
+        )
+        dotHardware?.preview(
+            program: dotTransition.program,
+            brightnessScale: universalBrightness,
+            duration: dotTransition.duration
+        )
     }
 
     private func persistProfiles() {
@@ -633,10 +664,16 @@ final class CommandCenterStore {
             ($0.agent.id, $0.agent.state)
         })
         let timing = hardwareTiming(from: lastOutputStates, to: currentStates)
-        proHardware?.update(enabled: liveOutputEnabled, program: proScene.program, timing: timing)
+        proHardware?.update(
+            enabled: liveOutputEnabled,
+            program: proScene.program,
+            brightnessScale: universalBrightness,
+            timing: timing
+        )
         dotHardware?.update(
             enabled: liveOutputEnabled,
             program: dotScene.program,
+            brightnessScale: universalBrightness,
             timing: dotHardwareTiming(from: timing)
         )
         lastOutputStates = currentStates

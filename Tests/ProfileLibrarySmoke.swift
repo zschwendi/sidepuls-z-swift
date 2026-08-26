@@ -139,6 +139,13 @@ enum ProfileLibrarySmoke {
         precondition(AppPreferences.menuBarIconStyle(from: preferencesDefaults) == .horizontalEight)
         AppPreferences.saveMenuBarIconStyle(.horizontalFour, to: preferencesDefaults)
         precondition(AppPreferences.menuBarIconStyle(from: preferencesDefaults) == .horizontalFour)
+        precondition(AppPreferences.universalBrightness(from: preferencesDefaults) == 1)
+        AppPreferences.saveUniversalBrightness(0.43, to: preferencesDefaults)
+        precondition(AppPreferences.universalBrightness(from: preferencesDefaults) == 0.43)
+        AppPreferences.saveUniversalBrightness(-1, to: preferencesDefaults)
+        precondition(AppPreferences.universalBrightness(from: preferencesDefaults) == 0)
+        AppPreferences.saveUniversalBrightness(2, to: preferencesDefaults)
+        precondition(AppPreferences.universalBrightness(from: preferencesDefaults) == 1)
         precondition(AppPreferences.batteryIndicatorSettings(from: preferencesDefaults) == BatteryIndicatorSettings())
         var batterySettings = BatteryIndicatorSettings()
         batterySettings.mode = .statusBottom
@@ -148,7 +155,7 @@ enum ProfileLibrarySmoke {
         AppPreferences.saveBatteryIndicatorSettings(batterySettings, to: preferencesDefaults)
         precondition(AppPreferences.batteryIndicatorSettings(from: preferencesDefaults) == batterySettings)
 
-        print("Profile library smoke passed: profiles, display mode, menu icon, and battery preferences persist independently")
+        print("Profile library smoke passed: profiles, display mode, menu icon, universal brightness, and battery preferences persist independently")
     }
 
     private static func require<T>(_ value: T?) throws -> T {

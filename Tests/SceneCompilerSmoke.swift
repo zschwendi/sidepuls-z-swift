@@ -314,6 +314,10 @@ enum SceneCompilerSmoke {
         precondition(SidePulseDeviceKind.detected(fromVolumeName: "Macintosh HD") == nil)
         precondition(SidePulseDeviceKind.pro.outputBrightnessScale == 1)
         precondition(SidePulseDeviceKind.dot.outputBrightnessScale == 0.4)
+        precondition(SidePulseDeviceKind.pro.calibratedBrightnessScale(universalBrightness: 0.5) == 0.5)
+        precondition(SidePulseDeviceKind.dot.calibratedBrightnessScale(universalBrightness: 0.5) == 0.2)
+        precondition(SidePulseDeviceKind.pro.calibratedBrightnessScale(universalBrightness: -1) == 0)
+        precondition(SidePulseDeviceKind.pro.calibratedBrightnessScale(universalBrightness: 2) == 1)
         precondition(SidePulseDeviceKind.pro.outputBlueScale == 1)
         precondition(SidePulseDeviceKind.dot.outputBlueScale == 0.75)
         precondition(

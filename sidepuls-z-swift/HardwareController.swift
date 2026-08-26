@@ -67,13 +67,16 @@ final class SidePulseHardwareController: @unchecked Sendable {
     func update(
         enabled: Bool,
         program: String,
+        brightnessScale: Double = 1,
         timing: HardwareUpdateTiming = .immediate
     ) {
         queue.async { [weak self] in
             guard let self else { return }
             let calibratedProgram = LEDProgramOutputCalibration.applying(
                 to: program,
-                brightnessScale: kind.outputBrightnessScale,
+                brightnessScale: kind.calibratedBrightnessScale(
+                    universalBrightness: brightnessScale
+                ),
                 blueScale: kind.outputBlueScale
             )
             let wasEnabled = outputEnabled
@@ -119,12 +122,18 @@ final class SidePulseHardwareController: @unchecked Sendable {
         }
     }
 
-    func preview(program: String, duration: TimeInterval = 3) {
+    func preview(
+        program: String,
+        brightnessScale: Double = 1,
+        duration: TimeInterval = 3
+    ) {
         queue.async { [weak self] in
             guard let self, state.connected else { return }
             let calibratedProgram = LEDProgramOutputCalibration.applying(
                 to: program,
-                brightnessScale: kind.outputBrightnessScale,
+                brightnessScale: kind.calibratedBrightnessScale(
+                    universalBrightness: brightnessScale
+                ),
                 blueScale: kind.outputBlueScale
             )
             cancelDeferredWriteLocked()

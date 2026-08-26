@@ -49,7 +49,7 @@ private struct SidePulseMenuBarIcon: View {
 
     var body: some View {
         let _ = animationTick
-        let program = store.device.connected ? store.device.activeProgram : store.scene.program
+        let program = store.liveProgram
         let elapsed = store.device.connected
             ? store.device.lastWrite.map { max(0, Date.now.timeIntervalSince($0)) }
                 ?? Date.now.timeIntervalSinceReferenceDate
@@ -245,6 +245,32 @@ struct SidePulseMenuBarView: View {
             }
             .pickerStyle(.segmented)
 
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 8) {
+                    Label("Universal Brightness", systemImage: "sun.max.fill")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(Int((store.universalBrightness * 100).rounded()))%")
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Slider(
+                    value: Binding(
+                        get: { store.universalBrightness },
+                        set: { store.setUniversalBrightness($0) }
+                    ),
+                    in: 0...1,
+                    step: 0.01
+                )
+                .tint(.purple)
+                .accessibilityLabel("Universal Brightness")
+                .accessibilityValue("\(Int((store.universalBrightness * 100).rounded())) percent")
+                Text("Dims every profile, animation, preview, and battery signal.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
             HStack {
                 Label("Menu Bar Icon", systemImage: "menubar.rectangle")
                     .font(.caption.weight(.medium))
@@ -303,7 +329,7 @@ private struct MenuBarPhysicalArrayView: View {
     @Bindable var store: CommandCenterStore
 
     var body: some View {
-        let program = store.device.connected ? store.device.activeProgram : store.scene.program
+        let program = store.liveProgram
         let firmware = LEDFirmwareProgram(program: program, ledCount: store.device.ledCount)
 
         TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in

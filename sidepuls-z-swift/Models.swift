@@ -654,6 +654,10 @@ enum SidePulseDeviceKind: String, CaseIterable, Sendable {
         }
     }
 
+    func calibratedBrightnessScale(universalBrightness: Double) -> Double {
+        outputBrightnessScale * max(0, min(1, universalBrightness))
+    }
+
     var outputBlueScale: Double {
         switch self {
         case .pro: 1
