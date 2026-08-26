@@ -247,7 +247,7 @@ struct SidePulseMenuBarView: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 8) {
-                    Label("Universal Brightness", systemImage: "sun.max.fill")
+                    Label("Max Brightness", systemImage: "sun.max.fill")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -264,7 +264,7 @@ struct SidePulseMenuBarView: View {
                     step: 0.01
                 )
                 .tint(.purple)
-                .accessibilityLabel("Universal Brightness")
+                .accessibilityLabel("Max Brightness")
                 .accessibilityValue("\(Int((store.universalBrightness * 100).rounded())) percent")
                 Text("Dims every profile, animation, preview, and battery signal.")
                     .font(.caption2)
