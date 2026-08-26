@@ -44,6 +44,15 @@ enum AgentRuntimeSmoke {
         let grokHookID = "runtime-smoke-grok-hook-\(UUID().uuidString)"
         let grokBotID = UUID().uuidString
         let staleHookID = "runtime-smoke-stale-hook-\(UUID().uuidString)"
+        try writeSessionIndex(
+            codexHome: codexHome,
+            names: [
+                completedID: "Completed runtime task",
+                abortedID: "Aborted runtime task",
+                toolID: "Tool runtime task",
+                recoverableID: "Recoverable runtime task",
+            ]
+        )
         let completedURL = transcriptFolder.appending(path: "completed.jsonl")
         try writeTranscript(url: completedURL, id: completedID, payload: ["type": "task_complete"])
         try writeTranscript(url: transcriptFolder.appending(path: "aborted.jsonl"), id: abortedID, payload: [
@@ -138,6 +147,10 @@ enum AgentRuntimeSmoke {
         precondition(
             agents.contains(where: { $0.sessionID == toolID && $0.state == .toolRunning }),
             "A tool call must stay a tool until an explicit output event"
+        )
+        precondition(
+            agents.first(where: { $0.sessionID == recoverableID })?.name == "Recoverable runtime task",
+            "Live hooks must use the canonical Codex thread name instead of a folder-ID fallback"
         )
         precondition(
             agents.contains(where: { $0.sessionID == abortedID && $0.state == .error }),
@@ -310,6 +323,20 @@ enum AgentRuntimeSmoke {
             key: "sidepulse.transcript.replicas.\(sessionID)",
             document: transcript
         )
+    }
+
+    private static func writeSessionIndex(
+        codexHome: URL,
+        names: [String: String]
+    ) throws {
+        let data = try names.sorted(by: { $0.key < $1.key }).reduce(into: Data()) { result, entry in
+            result.append(try JSONSerialization.data(
+                withJSONObject: ["id": entry.key, "thread_name": entry.value],
+                options: [.sortedKeys]
+            ))
+            result.append(0x0A)
+        }
+        try data.write(to: codexHome.appending(path: "session_index.jsonl"), options: .atomic)
     }
 
     private static func testGrokBotInferenceStability() {
@@ -488,6 +515,17 @@ enum AgentRuntimeSmoke {
             sessionID: backgroundID,
             name: "SidePulse (01a03f35)",
             message: backgroundPayload
+        )))
+        precondition(AgentTimelinePolicy.includes(session(
+            id: "codex:session:\(backgroundID)",
+            sessionID: backgroundID,
+            name: "YC (01a03f35)",
+            message: "Detected from local Codex activity"
+        )))
+        precondition(!AgentTimelinePolicy.includes(session(
+            id: "codex:session:\(backgroundID)",
+            sessionID: backgroundID,
+            name: "/0asdfe3fds"
         )))
         precondition(AgentTimelinePolicy.includes(session(
             id: "codex:session:\(backgroundID)",

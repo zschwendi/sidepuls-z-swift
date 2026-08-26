@@ -63,12 +63,33 @@ enum AgentTimelinePolicy {
         if session.message?.lowercased() == "codex subagent" {
             return false
         }
-
         let fallbackSuffix = "(\(String(session.sessionID.prefix(8))))"
         if session.name.hasSuffix(fallbackSuffix), isInternalBackgroundPayload(session.message) {
             return false
         }
+        if hasOpaqueInternalName(session) {
+            return false
+        }
         return true
+    }
+
+    static func fallbackName(project: String, sessionID: String) -> String {
+        "\(project) (\(String(sessionID.prefix(8))))"
+    }
+
+    static func hasOpaqueInternalName(_ session: AgentSession) -> Bool {
+        let name = session.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let sessionPrefix = String(session.sessionID.prefix(8)).lowercased()
+        guard !name.isEmpty, !sessionPrefix.isEmpty else { return true }
+
+        if name == sessionPrefix || name == "/\(sessionPrefix)" {
+            return true
+        }
+
+        guard name.hasPrefix("/"), name.count <= 80 else { return false }
+        return name.dropFirst().allSatisfy {
+            $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "/"
+        }
     }
 
     private static func isInternalBackgroundPayload(_ message: String?) -> Bool {
@@ -78,6 +99,7 @@ enum AgentTimelinePolicy {
         else { return false }
         return object.keys.contains("suggestions") || object.keys.contains("exclude")
     }
+
 }
 
 final class NativeAgentRuntime: @unchecked Sendable {
@@ -263,9 +285,18 @@ final class NativeAgentRuntime: @unchecked Sendable {
         let previous = sessions[key]
         let cwd = string(in: raw, keys: ["cwd", "workspaceRoot"]) ?? previous?.cwd
         let project = projectName(cwd) ?? previous?.project ?? "Unknown Project"
-        let title = string(in: raw, keys: ["session_title", "sessionTitle", "title", "task_name"])
-            ?? previous?.name
-            ?? "\(project) (\(String(sessionID.prefix(8))))"
+        let reportedTitle = string(
+            in: raw,
+            keys: ["session_title", "sessionTitle", "title", "task_name"]
+        )
+        let title = provider == .codex
+            ? threadNames[sessionID]
+                ?? reportedTitle
+                ?? previous?.name
+                ?? AgentTimelinePolicy.fallbackName(project: project, sessionID: sessionID)
+            : reportedTitle
+                ?? previous?.name
+                ?? "\(project) (\(String(sessionID.prefix(8))))"
         let message = string(in: raw, keys: ["message", "last_assistant_message", "lastAssistantMessage"])
         let toolName = string(in: raw, keys: ["tool_name", "toolName"])
         let state = stateForEvent(eventName, raw: raw, message: message)
@@ -522,7 +553,7 @@ private extension NativeAgentRuntime {
     }
 
     func discoverCodexSessionsLocked(now: Date) {
-        refreshThreadNamesLocked()
+        var changed = refreshThreadNamesLocked()
 
         var discovered: [String: AgentSession] = [:]
         var transcriptURLs: [String: URL] = [:]
@@ -539,8 +570,6 @@ private extension NativeAgentRuntime {
         }
 
         let newKeys = Set(discovered.keys)
-        var changed = false
-
         for key in discoveredKeys.subtracting(newKeys) {
             let hookIsRecent = hookEventDates[key].map { now.timeIntervalSince($0) <= 15 * 60 } ?? false
             if !hookIsRecent, sessions.removeValue(forKey: key) != nil { changed = true }
@@ -906,7 +935,10 @@ private extension NativeAgentRuntime {
         let project = projectName(cwd) ?? "Codex"
         let subagent = subagentIdentity(in: metadata)
         guard subagent == nil else { return nil }
-        let fallbackName = "\(project) (\(String(sessionID.prefix(8))))"
+        let fallbackName = AgentTimelinePolicy.fallbackName(
+            project: project,
+            sessionID: sessionID
+        )
         let activity = inferCodexActivity(snapshot.records)
         let updatedAt = snapshot.modifiedAt > now ? now : snapshot.modifiedAt
 
@@ -1075,13 +1107,13 @@ private extension NativeAgentRuntime {
         }
     }
 
-    func refreshThreadNamesLocked() {
+    func refreshThreadNamesLocked() -> Bool {
         let modified = try? codexSessionIndexURL
             .resourceValues(forKeys: [.contentModificationDateKey])
             .contentModificationDate
         guard modified != threadIndexModification,
               let data = try? Data(contentsOf: codexSessionIndexURL)
-        else { return }
+        else { return false }
 
         var updated: [String: String] = [:]
         for object in jsonLineObjects(in: data, dropFirstPartialLine: false) {
@@ -1093,6 +1125,16 @@ private extension NativeAgentRuntime {
         }
         threadNames = updated
         threadIndexModification = modified
+
+        var renamedExistingSession = false
+        for (sessionID, name) in updated {
+            let key = "codex:session:\(sessionID)"
+            guard var session = sessions[key], session.name != name else { continue }
+            session.name = name
+            sessions[key] = session
+            renamedExistingSession = true
+        }
+        return renamedExistingSession
     }
 
     func integrationStatusesLocked(visible: [AgentSession]) -> [AgentIntegrationStatus] {
