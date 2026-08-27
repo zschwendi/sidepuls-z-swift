@@ -27,6 +27,7 @@ enum AgentRuntimeSmoke {
         testAgentTimelinePolicy()
         testAgentOpenRouting()
         testGrokBotInferenceStability()
+        try testCodexIPCApprovalSignal()
 
         let temporaryRoot = URL(
             fileURLWithPath: "/tmp/sidepulse-runtime-smoke-\(UUID().uuidString.prefix(8))",
@@ -74,8 +75,7 @@ enum AgentRuntimeSmoke {
             recordType: "response_item",
             payload: [
                 "type": "custom_tool_call",
-                "name": "exec",
-                "input": #"const r = await tools.exec_command({cmd: "make install", sandbox_permissions: "require_escalated", justification: "Install this build?"});"#,
+                "name": "request_user_input",
             ]
         )
         let grokBotPersistence = temporaryRoot.appending(path: "grok-bot", directoryHint: .isDirectory)
@@ -164,7 +164,7 @@ enum AgentRuntimeSmoke {
         )
         precondition(
             agents.contains(where: { $0.sessionID == approvalID && $0.state == .waiting }),
-            "An unresolved Codex Allow Once prompt must be yellow Needs Approval"
+            "An unresolved Codex user-input request must be yellow Needs Approval"
         )
         precondition(
             agents.first(where: { $0.sessionID == recoverableID })?.name == "Recoverable runtime task",
@@ -494,6 +494,46 @@ enum AgentRuntimeSmoke {
         finished.state = .completed
         finished.updatedAt = finishedAt.addingTimeInterval(3)
         precondition(acknowledgements.shouldDisplay(finished), "A later completion must become green again")
+    }
+
+    private static func testCodexIPCApprovalSignal() throws {
+        func frame(flags: [String]) throws -> Data {
+            try JSONSerialization.data(withJSONObject: [
+                "type": "broadcast",
+                "method": "thread-stream-state-changed",
+                "params": [
+                    "conversationId": "approval-signal",
+                    "hostId": "local",
+                    "change": [
+                        "type": "snapshot",
+                        "revision": 1,
+                        "conversationState": [
+                            "threadRuntimeStatus": [
+                                "type": "active",
+                                "activeFlags": flags,
+                            ],
+                        ],
+                    ],
+                ],
+                "version": 11,
+            ])
+        }
+
+        let approval = CodexIPCBridge.snapshotNeedsUser(in: try frame(flags: ["waitingOnApproval"]))
+        let input = CodexIPCBridge.snapshotNeedsUser(in: try frame(flags: ["waitingOnUserInput"]))
+        let running = CodexIPCBridge.snapshotNeedsUser(in: try frame(flags: []))
+        precondition(
+            approval == true,
+            "Codex Desktop waitingOnApproval must map to yellow"
+        )
+        precondition(
+            input == true,
+            "Codex Desktop waitingOnUserInput must map to yellow"
+        )
+        precondition(
+            running == false,
+            "A running Codex thread without a pending decision must not stay yellow"
+        )
     }
 
     private static func testAgentTimelinePolicy() {

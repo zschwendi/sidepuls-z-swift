@@ -112,6 +112,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
     private let latestStateURL: URL
     private let codexSessionsRoot: URL
     private let codexSessionIndexURL: URL
+    private let codexIPCBridge: CodexIPCBridge
     private let grokBotPersistenceRoot: URL
     private let usesPersistentAppState: Bool
     private var server: LocalUnixEventServer?
@@ -163,6 +164,10 @@ final class NativeAgentRuntime: @unchecked Sendable {
         )
         codexSessionsRoot = codexHome.appending(path: "sessions", directoryHint: .isDirectory)
         codexSessionIndexURL = codexHome.appending(path: "session_index.jsonl")
+        codexIPCBridge = CodexIPCBridge(
+            socketPath: environment["SIDEPULSE_CODEX_IPC_SOCKET_PATH"]
+                ?? codexHome.appending(path: "ipc/ipc.sock").path
+        )
         grokBotPersistenceRoot = URL(
             fileURLWithPath: environment["GROK_BOT_PERSISTENCE_PATH"]
                 ?? FileManager.default.homeDirectoryForCurrentUser
@@ -184,6 +189,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
             timer = nil
             server?.stop()
             server = nil
+            codexIPCBridge.stop()
             ownsSocket = false
         }
     }
@@ -203,6 +209,13 @@ final class NativeAgentRuntime: @unchecked Sendable {
     }
 
     private func startLocked() {
+        codexIPCBridge.start { [weak self] in
+            self?.queue.async { [weak self] in
+                guard let self else { return }
+                self.discoverCodexSessionsLocked(now: .now)
+                self.publishLocked(force: true)
+            }
+        }
         loadLatestStateLocked(force: true)
         if usesPersistentAppState,
            completionAcknowledgements.acknowledgeExistingIfNeeded(Array(sessions.values)) {
@@ -595,6 +608,7 @@ private extension NativeAgentRuntime {
             return (key, url)
         })
         discoveredKeys = newKeys
+        codexIPCBridge.observe(threadIDs: Set(discovered.values.map(\.sessionID)))
 
         if changed {
             if ownsSocket { writeLatestStateLocked() }
@@ -946,7 +960,16 @@ private extension NativeAgentRuntime {
             project: project,
             sessionID: sessionID
         )
-        let activity = inferCodexActivity(snapshot.records)
+        let activity: CodexActivity
+        if codexIPCBridge.needsUser(threadID: sessionID) == true {
+            activity = CodexActivity(
+                state: .waiting,
+                eventName: "CodexNeedsApproval",
+                toolName: "Waiting for you"
+            )
+        } else {
+            activity = inferCodexActivity(snapshot.records)
+        }
         let updatedAt = snapshot.modifiedAt > now ? now : snapshot.modifiedAt
 
         return AgentSession(
@@ -1076,7 +1099,7 @@ private extension NativeAgentRuntime {
             switch itemType {
             case "custom_tool_call", "function_call", "local_shell_call":
                 let rawName = string(in: payload, keys: ["name", "tool_name"]) ?? "Tool"
-                if rawName == "request_user_input" || codexToolCallNeedsApproval(payload) {
+                if rawName == "request_user_input" {
                     return CodexActivity(state: .waiting, eventName: "CodexNeedsInput", toolName: "Waiting for you")
                 }
                 return CodexActivity(
@@ -1098,14 +1121,6 @@ private extension NativeAgentRuntime {
             }
         }
         return CodexActivity(state: .working, eventName: "CodexActivity", toolName: nil)
-    }
-
-    func codexToolCallNeedsApproval(_ payload: [String: Any]) -> Bool {
-        guard let input = string(in: payload, keys: ["input", "arguments"]) else { return false }
-        return input.range(
-            of: #"[\"']?sandbox_permissions[\"']?\s*:\s*[\"']require_escalated[\"']"#,
-            options: [.regularExpression, .caseInsensitive]
-        ) != nil
     }
 
     func friendlyToolName(_ rawName: String) -> String {
