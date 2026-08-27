@@ -186,6 +186,30 @@ enum MenuBarDotLayout {
     }
 }
 
+struct MenuBarDotAppearance: Equatable, Sendable {
+    var color: LEDProgramColor
+    var opacity: Double
+
+    static func liveArrayMatch(for output: LEDProgramColor) -> Self {
+        let peak = output.peak
+        guard peak > 0.004 else {
+            return Self(color: .black, opacity: 0)
+        }
+
+        // The live array fades into a black surface. The menu icon sits on a
+        // pale pill, so represent that same LED intensity with opacity instead
+        // of turning a dim colored dot into an opaque black one.
+        return Self(
+            color: LEDProgramColor(
+                red: output.red / peak,
+                green: output.green / peak,
+                blue: output.blue / peak
+            ),
+            opacity: min(1, peak * 2.2)
+        )
+    }
+}
+
 struct AgentSession: Identifiable, Codable, Hashable, Sendable {
     let id: String
     var provider: AgentProvider

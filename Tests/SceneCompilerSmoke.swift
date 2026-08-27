@@ -82,6 +82,23 @@ enum SceneCompilerSmoke {
             LEDProgramColor(red: 0.6, green: 0, blue: 0.6),
             LEDProgramColor(red: 0.1, green: 0, blue: 0.1),
         ], "Four-dot mode must preserve overlapping live-array wave brightness")
+        let dimMenuDot = MenuBarDotAppearance.liveArrayMatch(
+            for: LEDProgramColor(red: 0.1, green: 0, blue: 0.08)
+        )
+        precondition(approximately(dimMenuDot.color.red, 1))
+        precondition(approximately(dimMenuDot.color.green, 0))
+        precondition(approximately(dimMenuDot.color.blue, 0.8))
+        precondition(approximately(dimMenuDot.opacity, 0.22))
+        precondition(
+            MenuBarDotAppearance.liveArrayMatch(for: .black).opacity == 0,
+            "An unlit live-array LED must disappear into the menu pill"
+        )
+        precondition(
+            MenuBarDotAppearance.liveArrayMatch(
+                for: LEDProgramColor(red: 0, green: 0.8, blue: 0)
+            ).opacity == 1,
+            "A bright live-array LED must remain fully legible in the menu bar"
+        )
         precondition(SidePulseHardwareController.refreshInterval(for: "off") == nil)
         precondition(SidePulseHardwareController.refreshInterval(for: "0:#00FF00") == 15)
         precondition(

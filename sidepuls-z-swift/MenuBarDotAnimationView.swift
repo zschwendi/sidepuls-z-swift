@@ -90,19 +90,20 @@ final class MenuBarDotAnimationView: NSView {
             layoutSubtreeIfNeeded()
         }
 
-        let brightnessBoost = 2.2
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for index in dotLayers.indices {
             let output = colors.indices.contains(index) ? colors[index] : .black
-            let visible = output.peak > 0.004
+            let appearance = MenuBarDotAppearance.liveArrayMatch(for: output)
+            let visible = appearance.opacity > 0
             let dot = dotLayers[index]
             dot.isHidden = !visible
             if visible {
+                dot.opacity = Float(appearance.opacity)
                 dot.fillColor = NSColor(
-                    srgbRed: min(1, output.red * brightnessBoost),
-                    green: min(1, output.green * brightnessBoost),
-                    blue: min(1, output.blue * brightnessBoost),
+                    srgbRed: appearance.color.red,
+                    green: appearance.color.green,
+                    blue: appearance.color.blue,
                     alpha: 1
                 ).cgColor
             }
