@@ -1076,7 +1076,7 @@ private extension NativeAgentRuntime {
             switch itemType {
             case "custom_tool_call", "function_call", "local_shell_call":
                 let rawName = string(in: payload, keys: ["name", "tool_name"]) ?? "Tool"
-                if rawName == "request_user_input" {
+                if rawName == "request_user_input" || codexToolCallNeedsApproval(payload) {
                     return CodexActivity(state: .waiting, eventName: "CodexNeedsInput", toolName: "Waiting for you")
                 }
                 return CodexActivity(
@@ -1098,6 +1098,14 @@ private extension NativeAgentRuntime {
             }
         }
         return CodexActivity(state: .working, eventName: "CodexActivity", toolName: nil)
+    }
+
+    func codexToolCallNeedsApproval(_ payload: [String: Any]) -> Bool {
+        guard let input = string(in: payload, keys: ["input", "arguments"]) else { return false }
+        return input.range(
+            of: #"[\"']?sandbox_permissions[\"']?\s*:\s*[\"']require_escalated[\"']"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
     }
 
     func friendlyToolName(_ rawName: String) -> String {

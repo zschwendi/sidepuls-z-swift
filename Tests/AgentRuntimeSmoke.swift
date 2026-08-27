@@ -41,6 +41,7 @@ enum AgentRuntimeSmoke {
         let completedID = "runtime-smoke-completed-\(UUID().uuidString)"
         let abortedID = "runtime-smoke-aborted-\(UUID().uuidString)"
         let toolID = "runtime-smoke-tool-\(UUID().uuidString)"
+        let approvalID = "runtime-smoke-approval-\(UUID().uuidString)"
         let recoverableID = "runtime-smoke-recoverable-\(UUID().uuidString)"
         let grokHookID = "runtime-smoke-grok-hook-\(UUID().uuidString)"
         let grokBotID = UUID().uuidString
@@ -51,6 +52,7 @@ enum AgentRuntimeSmoke {
                 completedID: "Completed runtime task",
                 abortedID: "Aborted runtime task",
                 toolID: "Tool runtime task",
+                approvalID: "Approval runtime task",
                 recoverableID: "Recoverable runtime task",
             ]
         )
@@ -65,6 +67,16 @@ enum AgentRuntimeSmoke {
             id: toolID,
             recordType: "response_item",
             payload: ["type": "custom_tool_call", "name": "exec"]
+        )
+        try writeTranscript(
+            url: transcriptFolder.appending(path: "approval.jsonl"),
+            id: approvalID,
+            recordType: "response_item",
+            payload: [
+                "type": "custom_tool_call",
+                "name": "exec",
+                "input": #"const r = await tools.exec_command({cmd: "make install", sandbox_permissions: "require_escalated", justification: "Install this build?"});"#,
+            ]
         )
         let grokBotPersistence = temporaryRoot.appending(path: "grok-bot", directoryHint: .isDirectory)
         try writeGrokBotFixture(root: grokBotPersistence, sessionID: grokBotID)
@@ -91,6 +103,7 @@ enum AgentRuntimeSmoke {
             if states[completedID] == .completed,
                states[abortedID] == .error,
                states[toolID] == .toolRunning,
+               states[approvalID] == .waiting,
                states[grokBotID] == .waiting {
                 detected.signal()
             }
@@ -148,6 +161,10 @@ enum AgentRuntimeSmoke {
         precondition(
             agents.contains(where: { $0.sessionID == toolID && $0.state == .toolRunning }),
             "A tool call must stay a tool until an explicit output event"
+        )
+        precondition(
+            agents.contains(where: { $0.sessionID == approvalID && $0.state == .waiting }),
+            "An unresolved Codex Allow Once prompt must be yellow Needs Approval"
         )
         precondition(
             agents.first(where: { $0.sessionID == recoverableID })?.name == "Recoverable runtime task",
