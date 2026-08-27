@@ -26,7 +26,7 @@ private final class SidePulseMenuBarController: NSObject {
     private let store: CommandCenterStore
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
-    private let imageCache = MenuBarIconImageCache()
+    private let iconView = MenuBarDotAnimationView()
     private var displayLink: CADisplayLink?
     private var renderedProgramText = ""
     private var renderedLEDCount = 0
@@ -40,8 +40,17 @@ private final class SidePulseMenuBarController: NSObject {
         if let button = statusItem.button {
             button.target = self
             button.action = #selector(togglePopover(_:))
-            button.imagePosition = .imageOnly
+            button.image = nil
+            button.imagePosition = .noImage
             button.setAccessibilityLabel("SidePulse")
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            button.addSubview(iconView)
+            NSLayoutConstraint.activate([
+                iconView.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+                iconView.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+                iconView.widthAnchor.constraint(equalToConstant: MenuBarDotAnimationView.preferredSize.width),
+                iconView.heightAnchor.constraint(equalToConstant: MenuBarDotAnimationView.preferredSize.height),
+            ])
         }
 
         popover.behavior = .transient
@@ -103,14 +112,11 @@ private final class SidePulseMenuBarController: NSObject {
                 ?? Date.now.timeIntervalSinceReferenceDate
             : Date.now.timeIntervalSinceReferenceDate
         guard let frame = renderedProgram?.frame(at: elapsed) else { return }
-        let image = imageCache.image(
+        iconView.render(
             style: store.menuBarIconStyle,
-            colors: frame.colors,
+            sourceColors: frame.colors,
             emphasizesSequence: renderedProgram?.isRepeatingAnimation == true
         )
-        if button.image !== image {
-            button.image = image
-        }
         let toolTip = "SidePulse · \(store.agents.count) session\(store.agents.count == 1 ? "" : "s")"
         if button.toolTip != toolTip {
             button.toolTip = toolTip
@@ -126,143 +132,6 @@ private final class SidePulseMenuBarController: NSObject {
         } else {
             NSApp.sendAction(Selector(("newWindow:")), to: nil, from: nil)
         }
-    }
-}
-
-@MainActor
-private final class MenuBarIconImageCache {
-    private struct Key: Hashable {
-        var style: MenuBarIconStyle
-        var components: [UInt8]
-    }
-
-    private var images: [Key: NSImage] = [:]
-
-    func image(
-        style: MenuBarIconStyle,
-        colors: [LEDProgramColor],
-        emphasizesSequence: Bool
-    ) -> NSImage {
-        var dotColors = MenuBarDotLayout.colors(for: style, sourceColors: colors)
-        if emphasizesSequence {
-            dotColors = MenuBarSequentialEmphasis.colors(dotColors)
-        }
-        let quantizedColors = dotColors.map(Self.quantized)
-        let key = Key(
-            style: style,
-            components: quantizedColors.flatMap { color in
-                [color.red, color.green, color.blue].map {
-                    UInt8(max(0, min(255, Int(($0 * 255).rounded()))))
-                }
-            }
-        )
-        if let image = images[key] { return image }
-
-        let image = MenuBarIconRenderer.image(style: style, dotColors: quantizedColors)
-        images[key] = image
-        if images.count > 768 {
-            images = [key: image]
-        }
-        return image
-    }
-
-    private static func quantized(_ color: LEDProgramColor) -> LEDProgramColor {
-        func component(_ value: Double) -> Double {
-            let bucket = max(0, min(255, Int((value * 255).rounded())))
-            return Double(bucket) / 255
-        }
-
-        return LEDProgramColor(
-            red: component(color.red),
-            green: component(color.green),
-            blue: component(color.blue)
-        )
-    }
-}
-
-private enum MenuBarIconRenderer {
-    static let size = NSSize(width: 28, height: 16)
-
-    static func image(
-        style: MenuBarIconStyle,
-        dotColors: [LEDProgramColor]
-    ) -> NSImage {
-        renderedImage { bounds in
-            drawHorizontalDots(
-                colors: dotColors,
-                diameter: style == .horizontalEight ? 2.6 : 4.2,
-                spacing: style == .horizontalEight ? 0.65 : 0.7,
-                in: bounds
-            )
-        }
-    }
-
-    private static func renderedImage(
-        draw: @escaping (NSRect) -> Void
-    ) -> NSImage {
-        let image = NSImage(size: size, flipped: false) { bounds in
-            NSGraphicsContext.current?.shouldAntialias = true
-            draw(bounds)
-            return true
-        }
-        image.isTemplate = false
-        return image
-    }
-
-    private static func drawHorizontalDots(
-        colors: [LEDProgramColor],
-        diameter: CGFloat,
-        spacing: CGFloat,
-        in bounds: NSRect
-    ) {
-        let totalLength = CGFloat(colors.count) * diameter
-            + CGFloat(max(0, colors.count - 1)) * spacing
-        let horizontalPadding: CGFloat = colors.count > 4 ? 1.15 : 2
-        let verticalPadding: CGFloat = colors.count > 4 ? 2.1 : 1.65
-        let pillRect = NSRect(
-            x: bounds.midX - (totalLength + horizontalPadding * 2) / 2,
-            y: bounds.midY - (diameter + verticalPadding * 2) / 2,
-            width: totalLength + horizontalPadding * 2,
-            height: diameter + verticalPadding * 2
-        )
-        let pill = NSBezierPath(
-            roundedRect: pillRect,
-            xRadius: pillRect.height / 2,
-            yRadius: pillRect.height / 2
-        )
-        NSColor.white.withAlphaComponent(0.46).setFill()
-        pill.fill()
-        NSColor.black.withAlphaComponent(0.1).setStroke()
-        pill.lineWidth = 0.45
-        pill.stroke()
-
-        for index in colors.indices {
-            let rect = NSRect(
-                x: bounds.minX + (bounds.width - totalLength) / 2
-                    + CGFloat(index) * (diameter + spacing),
-                y: bounds.midY - diameter / 2,
-                width: diameter,
-                height: diameter
-            )
-            drawDot(in: rect, color: colors[index])
-        }
-    }
-
-    private static func drawDot(
-        in rect: NSRect,
-        color: LEDProgramColor
-    ) {
-        guard color.peak > 0.004 else { return }
-        let brightnessBoost = 2.2
-        let fill = NSColor(
-            srgbRed: min(1, color.red * brightnessBoost),
-            green: min(1, color.green * brightnessBoost),
-            blue: min(1, color.blue * brightnessBoost),
-            alpha: 1
-        )
-        fill.setFill()
-        let path = NSBezierPath(ovalIn: rect)
-        path.fill()
     }
 }
 
