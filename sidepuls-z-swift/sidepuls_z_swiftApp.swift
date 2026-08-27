@@ -194,6 +194,40 @@ struct SidePulseMenuBarView: View {
             }
 
             Divider()
+
+            Picker("Signal Mode", selection: Binding(
+                get: { store.agentDisplayMode },
+                set: { store.selectAgentDisplayMode($0) }
+            )) {
+                Text("Simple").tag(AgentDisplayMode.simple)
+                Text("Per Agent").tag(AgentDisplayMode.perAgent)
+            }
+            .pickerStyle(.segmented)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Label("Max Brightness", systemImage: "sun.max.fill")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(Int((store.universalBrightness * 100).rounded()))%")
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Slider(
+                    value: Binding(
+                        get: { store.universalBrightness },
+                        set: { store.setUniversalBrightness($0) }
+                    ),
+                    in: 0...1,
+                    step: 0.01
+                )
+                .tint(.purple)
+                .controlSize(.small)
+                .accessibilityLabel("Max Brightness")
+                .accessibilityValue("\(Int((store.universalBrightness * 100).rounded())) percent")
+            }
+
             Button("Quit SidePulse", systemImage: "power") { NSApp.terminate(nil) }
         }
         .padding(12)
