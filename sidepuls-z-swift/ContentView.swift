@@ -272,29 +272,58 @@ struct SignalModeControl: View {
 
     var body: some View {
         HStack(spacing: 18) {
-            Image(systemName: store.agentDisplayMode == .simple ? "circle.grid.2x2.fill" : "square.grid.3x3.fill")
+            Image(systemName: "gearshape.2.fill")
                 .font(.title2)
                 .foregroundStyle(.cyan)
                 .frame(width: 44, height: 44)
                 .background(.cyan.opacity(0.1), in: .circle)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Signal Mode")
+                Text("SidePulse Settings")
                     .font(.headline)
-                Text(store.agentDisplayMode.detail)
+                Text("Signal, hardware brightness, menu bar, and startup")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 8) {
-                Picker("Signal Mode", selection: Binding(
-                    get: { store.agentDisplayMode },
-                    set: { store.selectAgentDisplayMode($0) }
-                )) {
-                    ForEach(AgentDisplayMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+            VStack(alignment: .trailing, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text("Signal mode")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("Signal Mode", selection: Binding(
+                        get: { store.agentDisplayMode },
+                        set: { store.selectAgentDisplayMode($0) }
+                    )) {
+                        ForEach(AgentDisplayMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .frame(width: 180)
                 }
-                .pickerStyle(.segmented)
+
+                HStack(spacing: 8) {
+                    Text("Max brightness")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Slider(
+                        value: Binding(
+                            get: { store.universalBrightness },
+                            set: { store.setUniversalBrightness($0) }
+                        ),
+                        in: 0...1,
+                        step: 0.01
+                    )
+                    .tint(.purple)
+                    .controlSize(.small)
+                    .frame(width: 128)
+                    .accessibilityLabel("Max Brightness")
+                    .accessibilityValue("\(Int((store.universalBrightness * 100).rounded())) percent")
+                    Text("\(Int((store.universalBrightness * 100).rounded()))%")
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, alignment: .trailing)
+                }
 
                 HStack(spacing: 8) {
                     Text("Menu bar icon")
@@ -336,7 +365,7 @@ struct SignalModeControl: View {
                 }
 
             }
-            .frame(width: 270)
+            .frame(width: 300)
         }
         .padding(18)
         .glassEffect(.regular.tint(.cyan.opacity(0.06)), in: .rect(cornerRadius: 22))

@@ -59,8 +59,7 @@ private final class SidePulseMenuBarController: NSObject {
             rootView: AnyView(
                 SidePulseMenuBarView(
                     store: store,
-                    openAgent: { [weak self] agent in self?.openAgent(agent) },
-                    openCommandCenter: { [weak self] in self?.openCommandCenter() }
+                    openAgent: { [weak self] agent in self?.openAgent(agent) }
                 )
             )
         )
@@ -123,17 +122,6 @@ private final class SidePulseMenuBarController: NSObject {
         }
     }
 
-    private func openCommandCenter() {
-        popover.performClose(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        if let window = NSApp.windows.first(where: { $0.title == "Command Center" }) {
-            window.deminiaturize(nil)
-            window.makeKeyAndOrderFront(nil)
-        } else {
-            NSApp.sendAction(Selector(("newWindow:")), to: nil, from: nil)
-        }
-    }
-
     private func openAgent(_ agent: AgentSession) {
         popover.performClose(nil)
         store.openAgent(agent)
@@ -143,7 +131,6 @@ private final class SidePulseMenuBarController: NSObject {
 struct SidePulseMenuBarView: View {
     @Bindable var store: CommandCenterStore
     let openAgent: (AgentSession) -> Void
-    let openCommandCenter: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -183,8 +170,8 @@ struct SidePulseMenuBarView: View {
                             .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
                     } else {
                         ScrollView {
-                            LazyVStack(spacing: 6) {
-                                ForEach(store.agents) { agent in
+                            LazyVStack(spacing: LEDArrayPreviewStyle.menuBar.rowSpacing) {
+                                ForEach(Array(store.agents.prefix(8))) { agent in
                                     Button {
                                         openAgent(agent)
                                     } label: {
@@ -199,101 +186,18 @@ struct SidePulseMenuBarView: View {
                             }
                         }
                         .scrollIndicators(.hidden)
-                        .frame(height: min(314, max(64, CGFloat(store.agents.count) * 58)))
+                        .frame(height: LEDArrayPreviewStyle.menuBar.size(ledCount: 8).height)
+                        .padding(8)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Divider()
-
-            Picker("Signal Mode", selection: Binding(
-                get: { store.agentDisplayMode },
-                set: { store.selectAgentDisplayMode($0) }
-            )) {
-                ForEach(AgentDisplayMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 8) {
-                    Label("Max Brightness", systemImage: "sun.max.fill")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(Int((store.universalBrightness * 100).rounded()))%")
-                        .font(.caption.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-                Slider(
-                    value: Binding(
-                        get: { store.universalBrightness },
-                        set: { store.setUniversalBrightness($0) }
-                    ),
-                    in: 0...1,
-                    step: 0.01
-                )
-                .tint(.purple)
-                .controlSize(.small)
-                .accessibilityLabel("Max Brightness")
-                .accessibilityValue("\(Int((store.universalBrightness * 100).rounded())) percent")
-                Text("Dims every profile, animation, preview, and battery signal.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-
-            HStack {
-                Label("Menu Bar Icon", systemImage: "menubar.rectangle")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Picker("Menu Bar Icon", selection: Binding(
-                    get: { store.menuBarIconStyle },
-                    set: { store.selectMenuBarIconStyle($0) }
-                )) {
-                    ForEach(MenuBarIconStyle.allCases) { style in
-                        Text(style.title).tag(style)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(width: 120)
-            }
-
-            VStack(alignment: .leading, spacing: 5) {
-                Toggle("Start SidePulse at login", isOn: Binding(
-                    get: { store.launchAtLoginEnabled },
-                    set: { store.setLaunchAtLoginEnabled($0) }
-                ))
-                .toggleStyle(.switch)
-                if let message = store.launchAtLoginMessage {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(message)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        if store.launchAtLoginNeedsApproval {
-                            Button("Open Login Items") {
-                                store.openLoginItemsSettings()
-                            }
-                            .font(.caption2.weight(.semibold))
-                            .buttonStyle(.link)
-                        }
-                    }
-                }
-            }
-
-            Button("Open Command Center", systemImage: "slider.horizontal.3") {
-                openCommandCenter()
-            }
             Button("Quit SidePulse", systemImage: "power") { NSApp.terminate(nil) }
         }
         .padding(12)
         .frame(width: 280)
-        .onAppear {
-            store.refreshLaunchAtLoginStatus()
-        }
     }
 }
 
@@ -327,38 +231,29 @@ private struct MenuBarAgentRow: View {
     let color: Color
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 6) {
             Image(systemName: agent.state.symbol)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(color)
-                .frame(width: 30, height: 30)
-                .background(color.opacity(0.12), in: .rect(cornerRadius: 9))
+                .frame(width: 14, height: 14)
+                .background(color.opacity(0.12), in: .rect(cornerRadius: 4))
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(agent.name)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                HStack(spacing: 4) {
-                    Text(agent.provider.title)
-                    Text("·")
-                    Text(agent.project)
-                    Text("·")
-                    Text(agent.updatedAt, style: .relative)
-                        .monospacedDigit()
-                }
-                .font(.caption2)
+            Text(agent.name)
+                .font(.system(size: 10, weight: .semibold))
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+            Text(agent.provider.title)
+                .font(.system(size: 8, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            }
-
-            Spacer(minLength: 6)
             Image(systemName: "arrow.up.right")
-                .font(.caption2.weight(.bold))
+                .font(.system(size: 7, weight: .bold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(.horizontal, 10)
-        .frame(minHeight: 50)
+        .padding(.horizontal, 5)
+        .frame(height: LEDArrayPreviewStyle.menuBar.dotSize)
         .contentShape(.rect)
-        .background(color.opacity(0.055), in: .rect(cornerRadius: 12))
+        .background(color.opacity(0.07), in: .rect(cornerRadius: 5))
     }
 }
