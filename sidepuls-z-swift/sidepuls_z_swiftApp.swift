@@ -59,7 +59,8 @@ private final class SidePulseMenuBarController: NSObject {
             rootView: AnyView(
                 SidePulseMenuBarView(
                     store: store,
-                    openAgent: { [weak self] agent in self?.openAgent(agent) }
+                    openAgent: { [weak self] agent in self?.openAgent(agent) },
+                    openCommandCenter: { [weak self] in self?.openCommandCenter() }
                 )
             )
         )
@@ -122,6 +123,17 @@ private final class SidePulseMenuBarController: NSObject {
         }
     }
 
+    private func openCommandCenter() {
+        popover.performClose(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0.title == "Command Center" }) {
+            window.deminiaturize(nil)
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            NSApp.sendAction(Selector(("newWindow:")), to: nil, from: nil)
+        }
+    }
+
     private func openAgent(_ agent: AgentSession) {
         popover.performClose(nil)
         store.openAgent(agent)
@@ -131,6 +143,7 @@ private final class SidePulseMenuBarController: NSObject {
 struct SidePulseMenuBarView: View {
     @Bindable var store: CommandCenterStore
     let openAgent: (AgentSession) -> Void
+    let openCommandCenter: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -228,6 +241,9 @@ struct SidePulseMenuBarView: View {
                 .accessibilityValue("\(Int((store.universalBrightness * 100).rounded())) percent")
             }
 
+            Button("Open Command Center", systemImage: "slider.horizontal.3") {
+                openCommandCenter()
+            }
             Button("Quit SidePulse", systemImage: "power") { NSApp.terminate(nil) }
         }
         .padding(12)
