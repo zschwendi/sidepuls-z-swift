@@ -7,16 +7,16 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 250)
+                .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 195)
         } detail: {
             ZStack {
                 CommandCenterBackground()
-                detail.padding(26)
+                detail.padding(18)
             }
             .navigationTitle(store.selectedSection.title)
             .toolbar { toolbar }
         }
-        .frame(minWidth: 1_080, minHeight: 700)
+        .frame(minWidth: 880, minHeight: 580)
     }
 
     private var sidebar: some View {
@@ -28,27 +28,19 @@ struct ContentView: View {
             Section("Customize") {
                 Label(CommandCenterSection.lighting.title, systemImage: CommandCenterSection.lighting.symbol)
                     .tag(CommandCenterSection.lighting)
-                Label(CommandCenterSection.profiles.title, systemImage: CommandCenterSection.profiles.symbol)
-                    .tag(CommandCenterSection.profiles)
             }
             Section("Monitor") {
                 Label(CommandCenterSection.agents.title, systemImage: CommandCenterSection.agents.symbol)
                     .tag(CommandCenterSection.agents)
             }
             Section("Device") {
-                ForEach([CommandCenterSection.hardware, .system, .diagnostics]) { section in
-                    Label(section.title, systemImage: section.symbol).tag(section)
-                }
+                Label(CommandCenterSection.hardware.title, systemImage: CommandCenterSection.hardware.symbol)
+                    .tag(CommandCenterSection.hardware)
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("ACTIVE PROFILE")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                ProfileBadge(profile: store.selectedProfile)
+            Section {
+                Label(CommandCenterSection.settings.title, systemImage: CommandCenterSection.settings.symbol)
+                    .tag(CommandCenterSection.settings)
             }
-            .padding(14)
         }
     }
 
@@ -62,22 +54,13 @@ struct ContentView: View {
         case .hardware: HardwareView(store: store)
         case .system: SystemView(store: store)
         case .diagnostics: DiagnosticsView(store: store)
+        case .settings: SettingsView(store: store)
         }
     }
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup {
-            Picker("Profile", selection: Binding(
-                get: { store.selectedProfileID },
-                set: { store.selectProfile($0) }
-            )) {
-                ForEach(store.profiles) { profile in
-                    Label(profile.name, systemImage: profile.symbol).tag(profile.id)
-                }
-            }
-            .frame(width: 190)
-
             Toggle(isOn: $store.liveOutputEnabled) {
                 Label("Live Output", systemImage: "dot.radiowaves.left.and.right")
             }
@@ -91,26 +74,16 @@ struct OverviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+            VStack(alignment: .leading, spacing: 18) {
                 CommandCenterHero(store: store)
-                SignalModeControl(store: store)
-
-                DashboardSectionHeader(
-                    eyebrow: "LIVE HARDWARE",
-                    title: "What your SidePulse is showing",
-                    detail: "A full-brightness preview of the device state, with LED \(store.device.ledCount) at the top and LED 1 at the bottom."
-                )
-                LEDDeckView(store: store)
-
                 HStack(alignment: .top, spacing: 18) {
-                    if store.agentDisplayMode == .simple {
-                        SimpleSignalView(store: store)
-                    } else {
-                        AgentGridView(store: store)
-                    }
-                    ActionCenterView(store: store).frame(width: 300)
+                    LEDDeckView(store: store)
+                        .frame(maxWidth: .infinity)
+                    OverviewAgentsView(store: store)
+                        .frame(maxWidth: .infinity)
                 }
             }
+            .padding(.bottom, 8)
         }
         .scrollIndicators(.hidden)
     }
@@ -174,61 +147,56 @@ struct CommandCenterHero: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 26) {
-            VStack(alignment: .leading, spacing: 15) {
-                Label(statusLabel, systemImage: activeCount > 0 ? "wave.3.right.circle.fill" : "sparkles")
-                    .font(.caption.weight(.bold))
+        HStack(alignment: .center, spacing: 14) {
+            ZStack {
+                Circle().fill(tint.opacity(0.13))
+                Image(systemName: activeCount > 0 ? "wave.3.right" : "sparkles")
+                    .font(.title2.weight(.semibold))
                     .foregroundStyle(tint)
+            }
+            .frame(width: 42, height: 42)
 
+            VStack(alignment: .leading, spacing: 5) {
+                Text(statusLabel)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(tint)
                 Text(title)
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .font(.system(size: 21, weight: .bold, design: .rounded))
                 Text(detail)
-                    .font(.title3)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                HStack(spacing: 10) {
-                    primaryAction
-                    if activeCount > 0, store.device.connected, store.liveOutputEnabled {
-                        Button("Tune this signal", systemImage: "paintpalette.fill") {
-                            store.selectedState = store.aggregateState == .idle ? .working : store.aggregateState
-                            store.selectedSection = .lighting
-                        }
-                        .buttonStyle(.glass)
-                    }
-                }
+                    .lineLimit(2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Divider().frame(height: 190)
+            VStack(alignment: .trailing, spacing: 7) {
+                Picker("Signal Mode", selection: Binding(
+                    get: { store.agentDisplayMode },
+                    set: { store.selectAgentDisplayMode($0) }
+                )) {
+                    ForEach(AgentDisplayMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 176)
 
-            VStack(alignment: .leading, spacing: 14) {
-                Text("GET STARTED")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
-                SetupStepView(
-                    title: "Connect the device",
-                    detail: store.device.connected ? store.device.name : "Waiting for hardware",
-                    complete: store.device.connected,
-                    current: !store.device.connected
-                )
-                SetupStepView(
-                    title: "Enable live output",
-                    detail: store.liveOutputEnabled ? "Lighting is enabled" : "Output is paused",
-                    complete: store.liveOutputEnabled,
-                    current: store.device.connected && !store.liveOutputEnabled
-                )
-                SetupStepView(
-                    title: "Run an agent",
-                    detail: activeCount > 0 ? "\(activeCount) detected" : "Start or resume Codex",
-                    complete: activeCount > 0,
-                    current: store.device.connected && store.liveOutputEnabled && activeCount == 0
-                )
+                HStack(spacing: 7) {
+                    primaryAction
+                if activeCount > 0, store.device.connected, store.liveOutputEnabled {
+                    Button("Tune signal", systemImage: "paintpalette.fill") {
+                        store.selectedState = store.aggregateState == .idle ? .working : store.aggregateState
+                        store.selectedSection = .lighting
+                    }
+                    .buttonStyle(.glass)
+                }
+                }
             }
-            .frame(width: 270, alignment: .leading)
+            .controlSize(.small)
         }
-        .padding(28)
-        .glassEffect(.regular.tint(tint.opacity(0.09)), in: .rect(cornerRadius: 30))
+        .padding(14)
+        .glassEffect(.regular.tint(tint.opacity(0.08)), in: .rect(cornerRadius: 18))
     }
 
     @ViewBuilder
@@ -271,107 +239,212 @@ struct SignalModeControl: View {
     @Bindable var store: CommandCenterStore
 
     var body: some View {
-        HStack(spacing: 18) {
-            Image(systemName: "gearshape.2.fill")
-                .font(.title2)
-                .foregroundStyle(.cyan)
-                .frame(width: 44, height: 44)
-                .background(.cyan.opacity(0.1), in: .circle)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("SidePulse Settings")
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 11) {
+                Image(systemName: "slider.horizontal.3")
                     .font(.headline)
-                Text("Signal, hardware brightness, menu bar, and startup")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 10) {
-                HStack(spacing: 8) {
-                    Text("Signal mode")
+                    .foregroundStyle(.cyan)
+                    .frame(width: 34, height: 34)
+                    .background(.cyan.opacity(0.1), in: .rect(cornerRadius: 11))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Controls").font(.headline)
+                    Text("Device and app behavior")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Picker("Signal Mode", selection: Binding(
-                        get: { store.agentDisplayMode },
-                        set: { store.selectAgentDisplayMode($0) }
-                    )) {
-                        ForEach(AgentDisplayMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 180)
                 }
+            }
 
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("SIGNAL MODE")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                Picker("Signal Mode", selection: Binding(
+                    get: { store.agentDisplayMode },
+                    set: { store.selectAgentDisplayMode($0) }
+                )) {
+                    ForEach(AgentDisplayMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(maxWidth: .infinity)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
                     Text("Max brightness")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Slider(
-                        value: Binding(
-                            get: { store.universalBrightness },
-                            set: { store.setUniversalBrightness($0) }
-                        ),
-                        in: 0...1,
-                        step: 0.01
-                    )
-                    .tint(.purple)
-                    .controlSize(.small)
-                    .frame(width: 128)
-                    .accessibilityLabel("Max Brightness")
-                    .accessibilityValue("\(Int((store.universalBrightness * 100).rounded())) percent")
+                    Spacer()
                     Text("\(Int((store.universalBrightness * 100).rounded()))%")
                         .font(.caption.monospacedDigit().weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 34, alignment: .trailing)
                 }
-
-                HStack(spacing: 8) {
-                    Text("Menu bar icon")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Picker("Menu Bar Icon", selection: Binding(
-                        get: { store.menuBarIconStyle },
-                        set: { store.selectMenuBarIconStyle($0) }
-                    )) {
-                        ForEach(MenuBarIconStyle.allCases) { style in
-                            Text(style.title).tag(style)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                }
-
-                Toggle("Start at login", isOn: Binding(
-                    get: { store.launchAtLoginEnabled },
-                    set: { store.setLaunchAtLoginEnabled($0) }
-                ))
-                .font(.caption)
-                .toggleStyle(.switch)
-
-                if let message = store.launchAtLoginMessage {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(message)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.trailing)
-                        if store.launchAtLoginNeedsApproval {
-                            Button("Open Login Items") {
-                                store.openLoginItemsSettings()
-                            }
-                            .font(.caption2.weight(.semibold))
-                            .buttonStyle(.link)
-                        }
-                    }
-                }
-
+                Slider(
+                    value: Binding(
+                        get: { store.universalBrightness },
+                        set: { store.setUniversalBrightness($0) }
+                    ),
+                    in: 0...1,
+                    step: 0.01
+                )
+                .tint(.purple)
+                .controlSize(.small)
+                .accessibilityLabel("Max Brightness")
+                .accessibilityValue("\(Int((store.universalBrightness * 100).rounded())) percent")
             }
-            .frame(width: 300)
+
+            Divider()
+
+            HStack(spacing: 8) {
+                Text("Menu bar icon")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Picker("Menu Bar Icon", selection: Binding(
+                    get: { store.menuBarIconStyle },
+                    set: { store.selectMenuBarIconStyle($0) }
+                )) {
+                    ForEach(MenuBarIconStyle.allCases) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+            }
+
+            Toggle("Start at login", isOn: Binding(
+                get: { store.launchAtLoginEnabled },
+                set: { store.setLaunchAtLoginEnabled($0) }
+            ))
+            .font(.caption)
+            .toggleStyle(.switch)
+
+            if let message = store.launchAtLoginMessage {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(message)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if store.launchAtLoginNeedsApproval {
+                        Button("Open Login Items") {
+                            store.openLoginItemsSettings()
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .buttonStyle(.link)
+                    }
+                }
+            }
         }
-        .padding(18)
+        .padding(20)
         .glassEffect(.regular.tint(.cyan.opacity(0.06)), in: .rect(cornerRadius: 22))
         .onAppear {
             store.refreshLaunchAtLoginStatus()
         }
+    }
+}
+
+private enum SettingsPane: String, CaseIterable, Identifiable {
+    case general, profiles, connections, diagnostics
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+struct SettingsView: View {
+    @Bindable var store: CommandCenterStore
+    @State private var selectedPane = SettingsPane.general
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Settings").font(.title2.bold())
+                Spacer()
+                Picker("Settings", selection: $selectedPane) {
+                    ForEach(SettingsPane.allCases) { pane in
+                        Text(pane.title).tag(pane)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 390)
+            }
+
+            Group {
+                switch selectedPane {
+                case .general:
+                    ScrollView {
+                        SignalModeControl(store: store)
+                            .frame(maxWidth: 420, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .scrollIndicators(.hidden)
+                case .profiles:
+                    ProfilesView(store: store)
+                case .connections:
+                    SystemView(store: store)
+                case .diagnostics:
+                    DiagnosticsView(store: store)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
+struct OverviewAgentsView: View {
+    @Bindable var store: CommandCenterStore
+
+    private var visibleAgents: [AgentSession] { Array(store.agents.prefix(4)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Agents").font(.title2.bold())
+                    Text("Open a session or view the full timeline.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(store.agents.count) detected")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Button("View timeline", systemImage: "arrow.right") {
+                    store.selectedSection = .agents
+                }
+                .controlSize(.small)
+                .buttonStyle(.glass)
+            }
+
+            if visibleAgents.isEmpty {
+                Label("No active sessions", systemImage: "moon.stars.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 12)
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(visibleAgents) { agent in
+                        Button {
+                            store.openAgent(agent)
+                        } label: {
+                            AgentCard(agent: agent, profile: store.selectedProfile)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open \(agent.name)")
+                    }
+                }
+                if store.agents.count > visibleAgents.count {
+                    Button("\(store.agents.count - visibleAgents.count) more in Agent Timeline") {
+                        store.selectedSection = .agents
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.link)
+                }
+            }
+        }
+        .padding(16)
+        .glassEffect(.regular.tint(.purple.opacity(0.05)), in: .rect(cornerRadius: 24))
     }
 }
 
@@ -450,12 +523,12 @@ struct LEDDeckView: View {
                                 ledCount: store.device.ledCount
                             ).height
                         )
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 22)
-                        .frame(width: 126)
-                        .background(.black.opacity(0.68), in: .rect(cornerRadius: 30))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 16)
+                        .frame(width: 92)
+                        .background(.black.opacity(0.68), in: .rect(cornerRadius: 22))
                         .overlay {
-                            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
                                 .stroke(.white.opacity(0.1), lineWidth: 1)
                         }
 
@@ -469,7 +542,7 @@ struct LEDDeckView: View {
                             Label("Array off", systemImage: "moon.fill")
                                 .foregroundStyle(.secondary)
                         } else {
-                            ForEach(store.scene.placementsTopToBottom) { placement in
+                            ForEach(store.scene.placementsTopToBottom.prefix(store.agentDisplayMode == .simple ? 1 : 4)) { placement in
                                 let color = Color(hex: store.selectedProfile.style(for: placement.agent.state).colorHex)
                                 HStack(spacing: 11) {
                                     Capsule()
@@ -489,7 +562,7 @@ struct LEDDeckView: View {
                                             .foregroundStyle(.secondary)
                                     }
                                 }
-                                .padding(10)
+                                .padding(8)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(color.opacity(0.07), in: .rect(cornerRadius: 13))
                             }
@@ -498,15 +571,9 @@ struct LEDDeckView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                Label(
-                    "The squircles mirror the hardware's color, easing, delays, and animation phase. Max Brightness only changes the physical LEDs.",
-                    systemImage: "arrow.down"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
-            .padding(22)
-            .glassEffect(.regular.tint(.cyan.opacity(0.08)), in: .rect(cornerRadius: 28))
+            .padding(16)
+            .glassEffect(.regular.tint(.cyan.opacity(0.08)), in: .rect(cornerRadius: 22))
         }
     }
 }
@@ -1303,8 +1370,8 @@ private struct AgentTimelineRow: View {
             Image(systemName: agent.state.symbol)
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(color)
-                .frame(width: 42, height: 42)
-                .background(color.opacity(0.13), in: .rect(cornerRadius: 13))
+                .frame(width: 34, height: 34)
+                .background(color.opacity(0.13), in: .rect(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(agent.name)
@@ -1336,10 +1403,10 @@ private struct AgentTimelineRow: View {
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(.horizontal, 16)
-        .frame(minHeight: 72)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 50)
         .contentShape(.rect)
-        .glassEffect(.regular.tint(color.opacity(0.07)).interactive(), in: .rect(cornerRadius: 20))
+        .glassEffect(.regular.tint(color.opacity(0.07)).interactive(), in: .rect(cornerRadius: 15))
     }
 }
 

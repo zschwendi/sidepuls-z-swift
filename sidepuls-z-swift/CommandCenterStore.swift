@@ -5,7 +5,7 @@ import ServiceManagement
 import UniformTypeIdentifiers
 
 enum CommandCenterSection: String, CaseIterable, Identifiable {
-    case overview, lighting, profiles, agents, hardware, system, diagnostics
+    case overview, lighting, profiles, agents, hardware, system, diagnostics, settings
 
     var id: String { rawValue }
     var title: String {
@@ -17,6 +17,7 @@ enum CommandCenterSection: String, CaseIterable, Identifiable {
         case .hardware: "Hardware"
         case .system: "Connections"
         case .diagnostics: "Diagnostics"
+        case .settings: "Settings"
         }
     }
 
@@ -29,6 +30,7 @@ enum CommandCenterSection: String, CaseIterable, Identifiable {
         case .hardware: "externaldrive.fill"
         case .system: "switch.2"
         case .diagnostics: "waveform.path.ecg"
+        case .settings: "gearshape.fill"
         }
     }
 }

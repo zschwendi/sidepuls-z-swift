@@ -17,7 +17,7 @@ struct SidePulseCommandCenterApp: App {
         WindowGroup("SidePulse Command Center", id: "command-center") {
             ContentView(store: store)
         }
-        .defaultSize(width: 1_180, height: 780)
+        .defaultSize(width: 940, height: 640)
     }
 }
 

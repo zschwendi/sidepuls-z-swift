@@ -8,49 +8,49 @@ enum LEDArrayPreviewStyle: Sendable {
 
     var dotSize: CGFloat {
         switch self {
-        case .commandCenter: 50
+        case .commandCenter: 34
         case .menuBar: 18
         }
     }
 
     var rowSpacing: CGFloat {
         switch self {
-        case .commandCenter: 12
+        case .commandCenter: 7
         case .menuBar: 6
         }
     }
 
     var labelWidth: CGFloat {
         switch self {
-        case .commandCenter: 18
+        case .commandCenter: 14
         case .menuBar: 11
         }
     }
 
     var labelGap: CGFloat {
         switch self {
-        case .commandCenter: 12
+        case .commandCenter: 8
         case .menuBar: 6
         }
     }
 
     var cornerRadius: CGFloat {
         switch self {
-        case .commandCenter: 15
+        case .commandCenter: 10
         case .menuBar: 5
         }
     }
 
     var fontSize: CGFloat {
         switch self {
-        case .commandCenter: 11
+        case .commandCenter: 9
         case .menuBar: 9
         }
     }
 
     var shadowRadius: CGFloat {
         switch self {
-        case .commandCenter: 13
+        case .commandCenter: 8
         case .menuBar: 4
         }
     }
