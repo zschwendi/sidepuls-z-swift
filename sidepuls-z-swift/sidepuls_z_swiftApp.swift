@@ -148,7 +148,6 @@ struct SidePulseMenuBarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Image(systemName: "lightbulb.led.wide.fill").foregroundStyle(.cyan)
                 Text("SidePulse").font(.headline)
                 Spacer()
                 Text("\(store.agents.count) session\(store.agents.count == 1 ? "" : "s")")
@@ -167,7 +166,7 @@ struct SidePulseMenuBarView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("AGENT TIMELINE")
+                        Text("AGENT HUB")
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(.tertiary)
                         Spacer()
@@ -182,22 +181,7 @@ struct SidePulseMenuBarView: View {
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
                     } else {
-                        ScrollView {
-                            LazyVStack(spacing: LEDArrayPreviewStyle.menuBar.rowSpacing) {
-                                ForEach(Array(store.agents.prefix(8))) { agent in
-                                    Button {
-                                        openAgent(agent)
-                                    } label: {
-                                        MenuBarAgentRow(
-                                            agent: agent,
-                                            color: Color(hex: store.selectedProfile.style(for: agent.state).colorHex)
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Open \(agent.name)")
-                                }
-                            }
-                        }
+                        MenuBarAgentHubView(store: store, openAgent: openAgent)
                         .scrollIndicators(.hidden)
                         .frame(height: LEDArrayPreviewStyle.menuBar.size(ledCount: 8).height)
                         .padding(8)
@@ -248,6 +232,59 @@ struct SidePulseMenuBarView: View {
         }
         .padding(12)
         .frame(width: 280)
+    }
+}
+
+private struct MenuBarAgentHubView: View {
+    @Bindable var store: CommandCenterStore
+    let openAgent: (AgentSession) -> Void
+
+    var body: some View {
+        ScrollView {
+            if store.agentDisplayMode == .simple {
+                LazyVStack(spacing: LEDArrayPreviewStyle.menuBar.rowSpacing) {
+                    ForEach(Array(store.agents.prefix(8))) { agent in
+                        agentButton(agent)
+                    }
+                }
+            } else {
+                LazyVStack(spacing: LEDArrayPreviewStyle.menuBar.rowSpacing) {
+                    ForEach(0..<displayedLEDCount, id: \.self) { row in
+                        if let placement = placementsByTopRow[row] {
+                            agentButton(placement.agent)
+                        } else {
+                            Color.clear
+                                .frame(height: LEDArrayPreviewStyle.menuBar.dotSize)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var displayedLEDCount: Int {
+        max(1, min(8, store.device.ledCount))
+    }
+
+    private var placementsByTopRow: [Int: AgentArrayPlacement] {
+        Dictionary(uniqueKeysWithValues: store.scene.placementsTopToBottom.compactMap { placement in
+            guard let row = placement.topDisplayRow(ledCount: displayedLEDCount) else { return nil }
+            return (row, placement)
+        })
+    }
+
+    private func agentButton(_ agent: AgentSession) -> some View {
+        Button {
+            openAgent(agent)
+        } label: {
+            MenuBarAgentRow(
+                agent: agent,
+                color: Color(hex: store.selectedProfile.style(for: agent.state).colorHex)
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Open \(agent.name)")
     }
 }
 

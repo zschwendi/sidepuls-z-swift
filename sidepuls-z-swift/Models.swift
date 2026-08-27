@@ -605,6 +605,15 @@ struct AgentArrayPlacement: Identifiable, Equatable, Sendable {
         guard let top = physicalLEDs.first, let bottom = physicalLEDs.last else { return "Off array" }
         return top == bottom ? "LED \(top)" : "LEDs \(top)–\(bottom)"
     }
+
+    /// Zero-based visual row for the highest physical LED owned by this session.
+    /// LED 8 is row 0 in the vertical menu-bar array.
+    func topDisplayRow(ledCount: Int) -> Int? {
+        let count = max(1, min(8, ledCount))
+        guard let topLEDIndex = ledIndices.max() else { return nil }
+        let row = (count - 1) - topLEDIndex
+        return (0..<count).contains(row) ? row : nil
+    }
 }
 
 struct CompiledScene: Equatable, Sendable {

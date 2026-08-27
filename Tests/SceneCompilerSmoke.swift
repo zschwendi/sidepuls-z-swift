@@ -698,6 +698,14 @@ enum SceneCompilerSmoke {
         )
         precondition(scene.placementsTopToBottom.map(\.ledIndices.count) == expectedOccupancy)
         precondition(scene.placementsTopToBottom.first?.ledIndices.max() == 7, "First resident must begin at physical LED 8")
+        let alignedRows = scene.placementsTopToBottom.compactMap { $0.topDisplayRow(ledCount: 8) }
+        let expectedRows = expectedOccupancy.dropLast().reduce(into: [0]) { rows, occupancy in
+            rows.append((rows.last ?? 0) + occupancy)
+        }
+        precondition(
+            alignedRows == Array(expectedRows.prefix(expectedOccupancy.count)),
+            "Menu agent rows must align with the highest LED in each allocation"
+        )
         if agentCount == 3 {
             precondition(scene.slots.filter { $0.agent == nil }.count == 2, "Three agents must leave LEDs 2 and 1 off")
         }

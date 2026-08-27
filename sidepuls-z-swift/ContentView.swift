@@ -402,7 +402,7 @@ struct OverviewAgentsView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Agents").font(.title2.bold())
-                    Text("Open a session or view the full timeline.")
+                    Text("Open a session or view the full hub.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -410,7 +410,7 @@ struct OverviewAgentsView: View {
                 Text("\(store.agents.count) detected")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Button("View timeline", systemImage: "arrow.right") {
+                Button("Open Hub", systemImage: "arrow.right") {
                     store.selectedSection = .agents
                 }
                 .controlSize(.small)
@@ -435,7 +435,7 @@ struct OverviewAgentsView: View {
                     }
                 }
                 if store.agents.count > visibleAgents.count {
-                    Button("\(store.agents.count - visibleAgents.count) more in Agent Timeline") {
+                    Button("\(store.agents.count - visibleAgents.count) more in Agent Hub") {
                         store.selectedSection = .agents
                     }
                     .font(.caption.weight(.semibold))
@@ -1295,7 +1295,7 @@ struct AgentsView: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Agent Timeline").font(.largeTitle.bold())
+                    Text("Agent Hub").font(.largeTitle.bold())
                     Text("Every detected session stays available here. Signal Mode only changes the lights.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
