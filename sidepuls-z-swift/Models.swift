@@ -186,27 +186,6 @@ enum MenuBarDotLayout {
     }
 }
 
-/// Removes the long dim tails that make a sequential status-bar animation read
-/// as a sliding gradient. Full-array and symmetric states remain unchanged
-/// because their dots share the same peak brightness.
-enum MenuBarSequentialEmphasis {
-    static func colors(_ colors: [LEDProgramColor]) -> [LEDProgramColor] {
-        let framePeak = colors.map(\.peak).max() ?? 0
-        guard framePeak > 0.004 else { return colors }
-
-        return colors.map { color in
-            let relativePeak = color.peak / framePeak
-            let emphasis = smoothStep(relativePeak, from: 0.92, to: 0.985)
-            return color.scaled(by: emphasis)
-        }
-    }
-
-    private static func smoothStep(_ value: Double, from lower: Double, to upper: Double) -> Double {
-        let progress = max(0, min(1, (value - lower) / (upper - lower)))
-        return progress * progress * (3 - (2 * progress))
-    }
-}
-
 struct AgentSession: Identifiable, Codable, Hashable, Sendable {
     let id: String
     var provider: AgentProvider

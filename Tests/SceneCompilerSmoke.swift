@@ -45,6 +45,13 @@ enum SceneCompilerSmoke {
             LEDProgramColor(red: 0, green: 1, blue: 0),
             LEDProgramColor(red: 0, green: 0, blue: 1),
         ]
+        precondition(
+            MenuBarDotLayout.colors(
+                for: .horizontalEight,
+                sourceColors: menuBarSourceColors
+            ) == menuBarSourceColors,
+            "Eight-dot menu bar frames must match the live array exactly"
+        )
         let mirroredMenuBarColors = MenuBarDotLayout.colors(
             for: .horizontalFour,
             sourceColors: menuBarSourceColors
@@ -56,30 +63,25 @@ enum SceneCompilerSmoke {
         )
         precondition(condensedMenuBarColors[0] == LEDProgramColor(red: 1, green: 0, blue: 0))
         precondition(condensedMenuBarColors[1] == LEDProgramColor(red: 0, green: 1, blue: 0))
-        let emphasizedSequence = MenuBarSequentialEmphasis.colors([
-            LEDProgramColor(red: 1, green: 0, blue: 0),
-            LEDProgramColor(red: 0.6, green: 0, blue: 0),
-            LEDProgramColor(red: 0.2, green: 0, blue: 0),
-        ])
-        precondition(emphasizedSequence[0] == LEDProgramColor(red: 1, green: 0, blue: 0))
-        precondition(emphasizedSequence[1] == .black)
-        precondition(emphasizedSequence[2] == .black)
-        let emphasizedShoulder = MenuBarSequentialEmphasis.colors([
-            LEDProgramColor(red: 1, green: 0, blue: 0),
-            LEDProgramColor(red: 0.9, green: 0, blue: 0),
-        ])
-        precondition(emphasizedShoulder[1] == .black, "Sequential icon must not retain a dim worm tail")
-        let emphasizedHandoff = MenuBarSequentialEmphasis.colors([
-            LEDProgramColor(red: 1, green: 0, blue: 0),
-            LEDProgramColor(red: 1, green: 0, blue: 0),
-            LEDProgramColor(red: 0.8, green: 0, blue: 0),
-        ])
-        precondition(emphasizedHandoff[0].peak == 1 && emphasizedHandoff[1].peak == 1)
-        precondition(emphasizedHandoff[2] == .black)
-        let emphasizedSolid = MenuBarSequentialEmphasis.colors(
-            Array(repeating: LEDProgramColor(red: 0, green: 0.8, blue: 0), count: 4)
+        let overlappingWaveColors = MenuBarDotLayout.colors(
+            for: .horizontalFour,
+            sourceColors: [
+                LEDProgramColor(red: 0.25, green: 0, blue: 0.25),
+                LEDProgramColor(red: 0.2, green: 0, blue: 0.2),
+                LEDProgramColor(red: 0.8, green: 0, blue: 0.8),
+                LEDProgramColor(red: 0.75, green: 0, blue: 0.75),
+                LEDProgramColor(red: 0.6, green: 0, blue: 0.6),
+                LEDProgramColor(red: 0.55, green: 0, blue: 0.55),
+                LEDProgramColor(red: 0.1, green: 0, blue: 0.1),
+                LEDProgramColor(red: 0.05, green: 0, blue: 0.05),
+            ]
         )
-        precondition(emphasizedSolid.allSatisfy { $0 == LEDProgramColor(red: 0, green: 0.8, blue: 0) })
+        precondition(overlappingWaveColors == [
+            LEDProgramColor(red: 0.25, green: 0, blue: 0.25),
+            LEDProgramColor(red: 0.8, green: 0, blue: 0.8),
+            LEDProgramColor(red: 0.6, green: 0, blue: 0.6),
+            LEDProgramColor(red: 0.1, green: 0, blue: 0.1),
+        ], "Four-dot mode must preserve overlapping live-array wave brightness")
         precondition(SidePulseHardwareController.refreshInterval(for: "off") == nil)
         precondition(SidePulseHardwareController.refreshInterval(for: "0:#00FF00") == 15)
         precondition(

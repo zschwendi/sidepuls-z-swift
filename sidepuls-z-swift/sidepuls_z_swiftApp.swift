@@ -114,8 +114,7 @@ private final class SidePulseMenuBarController: NSObject {
         guard let frame = renderedProgram?.frame(at: elapsed) else { return }
         iconView.render(
             style: store.menuBarIconStyle,
-            sourceColors: frame.colors,
-            emphasizesSequence: renderedProgram?.isRepeatingAnimation == true
+            sourceColors: frame.colors
         )
         let toolTip = "SidePulse · \(store.agents.count) session\(store.agents.count == 1 ? "" : "s")"
         if button.toolTip != toolTip {

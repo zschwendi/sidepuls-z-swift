@@ -76,13 +76,9 @@ final class MenuBarDotAnimationView: NSView {
 
     func render(
         style: MenuBarIconStyle,
-        sourceColors: [LEDProgramColor],
-        emphasizesSequence: Bool
+        sourceColors: [LEDProgramColor]
     ) {
-        var colors = MenuBarDotLayout.colors(for: style, sourceColors: sourceColors)
-        if emphasizesSequence {
-            colors = MenuBarSequentialEmphasis.colors(colors)
-        }
+        let colors = MenuBarDotLayout.colors(for: style, sourceColors: sourceColors)
 
         let geometryChanged = self.style != style || dotLayers.count != colors.count
         self.style = style
