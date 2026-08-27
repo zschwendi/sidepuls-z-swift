@@ -40,7 +40,6 @@ final class CommandCenterStore {
     var profiles: [LightingProfile] = [.factoryDefault]
     var selectedProfileID = LightingProfile.factoryDefault.id
     var selectedState: AgentState = .working
-    var selectedAgentID: String?
     var agents: [AgentSession]
     var integrations: [AgentIntegrationStatus] = AgentProvider.allCases
         .filter { $0 != .unknown }
@@ -362,14 +361,25 @@ final class CommandCenterStore {
         NSWorkspace.shared.open(url)
     }
 
-    func selectAgent(_ agent: AgentSession) {
-        selectedAgentID = agent.id
-        selectedSection = .agents
+    func openAgent(_ agent: AgentSession) {
         if agent.state == .completed {
             runtime?.acknowledgeCompleted(sessionID: agent.id)
         }
-        guard let destination = agent.openURL else { return }
-        NSWorkspace.shared.open(destination)
+        guard let destination = AgentOpenRouting.destination(for: agent) else { return }
+
+        let workspace = NSWorkspace.shared
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        if let bundleIdentifier = AgentOpenRouting.applicationBundleIdentifier(for: destination),
+           let applicationURL = workspace.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+            workspace.open(
+                [destination],
+                withApplicationAt: applicationURL,
+                configuration: configuration
+            ) { _, _ in }
+        } else {
+            workspace.open(destination, configuration: configuration) { _, _ in }
+        }
     }
 
     func openCodex() {

@@ -324,7 +324,10 @@ final class NativeAgentRuntime: @unchecked Sendable {
             toolName: toolName ?? previous?.toolName,
             updatedAt: timestamp,
             message: message,
-            openURL: previous?.openURL
+            openURL: previous?.openURL ?? AgentOpenRouting.fallbackDestination(
+                provider: provider,
+                sessionID: sessionID
+            )
         )
         writeLatestStateLocked()
         publishLocked(force: true)
@@ -360,6 +363,10 @@ final class NativeAgentRuntime: @unchecked Sendable {
                 updatedAt: parseTimestamp(status.updatedAt),
                 message: status.message,
                 openURL: status.openURL.flatMap(URL.init(string:))
+                    ?? AgentOpenRouting.fallbackDestination(
+                        provider: provider,
+                        sessionID: sessionID
+                    )
             )
             if AgentTimelinePolicy.includes(session) {
                 loaded[status.agentID] = session

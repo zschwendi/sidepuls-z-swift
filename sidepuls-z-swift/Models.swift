@@ -206,6 +206,43 @@ struct AgentSession: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+enum AgentOpenRouting {
+    static func destination(for agent: AgentSession) -> URL? {
+        agent.openURL ?? fallbackDestination(
+            provider: agent.provider,
+            sessionID: agent.sessionID
+        )
+    }
+
+    static func fallbackDestination(
+        provider: AgentProvider,
+        sessionID: String
+    ) -> URL? {
+        switch provider {
+        case .codex:
+            let id = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty else { return nil }
+            var components = URLComponents()
+            components.scheme = "codex"
+            components.host = "threads"
+            components.path = "/\(id)"
+            return components.url
+        case .grokBot:
+            return URL(string: "grokbot://app/v1/open")
+        case .grok, .claude, .unknown:
+            return nil
+        }
+    }
+
+    static func applicationBundleIdentifier(for destination: URL) -> String? {
+        switch destination.scheme?.lowercased() {
+        case "codex": "com.openai.codex"
+        case "grokbot", "sand": "com.anysphere.sand"
+        default: nil
+        }
+    }
+}
+
 enum AgentDisplayPolicy {
     static func aggregateState(
         for agents: [AgentSession],

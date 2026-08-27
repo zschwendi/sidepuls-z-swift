@@ -59,6 +59,7 @@ private final class SidePulseMenuBarController: NSObject {
             rootView: AnyView(
                 SidePulseMenuBarView(
                     store: store,
+                    openAgent: { [weak self] agent in self?.openAgent(agent) },
                     openCommandCenter: { [weak self] in self?.openCommandCenter() }
                 )
             )
@@ -132,10 +133,16 @@ private final class SidePulseMenuBarController: NSObject {
             NSApp.sendAction(Selector(("newWindow:")), to: nil, from: nil)
         }
     }
+
+    private func openAgent(_ agent: AgentSession) {
+        popover.performClose(nil)
+        store.openAgent(agent)
+    }
 }
 
 struct SidePulseMenuBarView: View {
     @Bindable var store: CommandCenterStore
+    let openAgent: (AgentSession) -> Void
     let openCommandCenter: () -> Void
 
     var body: some View {
@@ -179,10 +186,7 @@ struct SidePulseMenuBarView: View {
                             LazyVStack(spacing: 6) {
                                 ForEach(store.agents) { agent in
                                     Button {
-                                        if agent.openURL == nil {
-                                            openCommandCenter()
-                                        }
-                                        store.selectAgent(agent)
+                                        openAgent(agent)
                                     } label: {
                                         MenuBarAgentRow(
                                             agent: agent,

@@ -255,7 +255,7 @@ struct CommandCenterHero: View {
             .buttonStyle(.glassProminent)
         } else if let finishedPlacement {
             Button("Open Finished Run", systemImage: "checkmark.circle.fill") {
-                store.selectAgent(finishedPlacement.agent)
+                store.openAgent(finishedPlacement.agent)
             }
             .buttonStyle(.glassProminent)
         } else {
@@ -1225,7 +1225,7 @@ struct AgentsView: View {
                 LazyVStack(spacing: 10) {
                     ForEach(store.agents) { agent in
                         Button {
-                            store.selectAgent(agent)
+                            store.openAgent(agent)
                         } label: {
                             AgentTimelineRow(
                                 agent: agent,

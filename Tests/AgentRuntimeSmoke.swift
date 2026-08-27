@@ -25,6 +25,7 @@ enum AgentRuntimeSmoke {
     static func main() throws {
         testCompletionAcknowledgements()
         testAgentTimelinePolicy()
+        testAgentOpenRouting()
         testGrokBotInferenceStability()
 
         let temporaryRoot = URL(
@@ -540,5 +541,58 @@ enum AgentRuntimeSmoke {
             provider: .grokBot,
             message: backgroundPayload
         )))
+    }
+
+    private static func testAgentOpenRouting() {
+        func session(
+            provider: AgentProvider,
+            sessionID: String,
+            openURL: URL? = nil
+        ) -> AgentSession {
+            AgentSession(
+                id: "\(provider.rawValue):session:\(sessionID)",
+                provider: provider,
+                sessionID: sessionID,
+                name: "Open routing fixture",
+                project: "SidePulse",
+                cwd: nil,
+                state: .working,
+                eventName: "Working",
+                toolName: nil,
+                updatedAt: .now,
+                message: nil,
+                openURL: openURL
+            )
+        }
+
+        let codex = session(provider: .codex, sessionID: "thread-id")
+        precondition(
+            AgentOpenRouting.destination(for: codex)?.absoluteString
+                == "codex://threads/thread-id",
+            "Codex sessions must remain directly openable when runtime open_url is missing"
+        )
+        precondition(
+            AgentOpenRouting.applicationBundleIdentifier(
+                for: AgentOpenRouting.destination(for: codex)!
+            ) == "com.openai.codex"
+        )
+
+        let explicitURL = URL(string: "https://chatgpt.com/codex/tasks/cloud-task")!
+        let cloud = session(provider: .codex, sessionID: "cloud-task", openURL: explicitURL)
+        precondition(
+            AgentOpenRouting.destination(for: cloud) == explicitURL,
+            "Explicit cloud-task URLs must take precedence over local Codex fallbacks"
+        )
+
+        let grokBot = session(provider: .grokBot, sessionID: "grok-session")
+        precondition(
+            AgentOpenRouting.destination(for: grokBot)?.absoluteString
+                == "grokbot://app/v1/open"
+        )
+        precondition(
+            AgentOpenRouting.destination(
+                for: session(provider: .unknown, sessionID: "unknown")
+            ) == nil
+        )
     }
 }
