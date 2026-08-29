@@ -542,7 +542,8 @@ enum AgentRuntimeSmoke {
             sessionID: String = "top-level-session",
             name: String = "Named task",
             provider: AgentProvider = .codex,
-            message: String? = nil
+            message: String? = nil,
+            cwd: String = "/tmp/SidePulse"
         ) -> AgentSession {
             AgentSession(
                 id: id,
@@ -550,7 +551,7 @@ enum AgentRuntimeSmoke {
                 sessionID: sessionID,
                 name: name,
                 project: "SidePulse",
-                cwd: "/tmp/SidePulse",
+                cwd: cwd,
                 state: .working,
                 eventName: "Working",
                 toolName: nil,
@@ -584,6 +585,23 @@ enum AgentRuntimeSmoke {
             id: "codex:session:\(backgroundID)",
             sessionID: backgroundID,
             name: "/0asdfe3fds"
+        )))
+        let memoryMaintenancePath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/memories", isDirectory: true)
+            .path
+        precondition(!AgentTimelinePolicy.includes(session(
+            id: "codex:session:\(backgroundID)",
+            sessionID: backgroundID,
+            name: "memories (01a03f35)",
+            message: "Consolidation complete.",
+            cwd: memoryMaintenancePath
+        )))
+        precondition(AgentTimelinePolicy.includes(session(
+            id: "codex:session:\(backgroundID)",
+            sessionID: backgroundID,
+            name: "memories (01a03f35)",
+            message: "User project activity",
+            cwd: "/Users/zach/Developer/memories"
         )))
         precondition(AgentTimelinePolicy.includes(session(
             id: "codex:session:\(backgroundID)",

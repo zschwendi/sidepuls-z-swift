@@ -63,6 +63,9 @@ enum AgentTimelinePolicy {
         if session.message?.lowercased() == "codex subagent" {
             return false
         }
+        if isCodexMemoryMaintenance(session) {
+            return false
+        }
         let fallbackSuffix = "(\(String(session.sessionID.prefix(8))))"
         if session.name.hasSuffix(fallbackSuffix), isInternalBackgroundPayload(session.message) {
             return false
@@ -90,6 +93,15 @@ enum AgentTimelinePolicy {
         return name.dropFirst().allSatisfy {
             $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "/"
         }
+    }
+
+    private static func isCodexMemoryMaintenance(_ session: AgentSession) -> Bool {
+        guard let cwd = session.cwd else { return false }
+        let sessionPath = URL(fileURLWithPath: cwd).standardizedFileURL.path
+        let maintenancePath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/memories", isDirectory: true)
+            .standardizedFileURL.path
+        return sessionPath == maintenancePath
     }
 
     private static func isInternalBackgroundPayload(_ message: String?) -> Bool {
