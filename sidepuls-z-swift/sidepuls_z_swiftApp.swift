@@ -8,6 +8,7 @@ struct SidePulseCommandCenterApp: App {
     private let menuBarController: SidePulseMenuBarController
 
     init() {
+        LegacySidePulsePreferences.migrateIfNeeded()
         let store = CommandCenterStore()
         _store = State(initialValue: store)
         menuBarController = SidePulseMenuBarController(store: store)
@@ -36,6 +37,10 @@ private final class SidePulseMenuBarController: NSObject {
         self.store = store
         statusItem = NSStatusBar.system.statusItem(withLength: 32)
         super.init()
+
+        // Give macOS one stable identity for placement and visibility while
+        // still respecting the user's system-level menu bar setting.
+        statusItem.autosaveName = "SidePulseStatusItem"
 
         if let button = statusItem.button {
             button.target = self

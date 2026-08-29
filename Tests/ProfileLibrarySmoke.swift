@@ -155,6 +155,22 @@ enum ProfileLibrarySmoke {
         AppPreferences.saveBatteryIndicatorSettings(batterySettings, to: preferencesDefaults)
         precondition(AppPreferences.batteryIndicatorSettings(from: preferencesDefaults) == batterySettings)
 
+        let identityMigrationSuite = "sidepulse.identity-migration-smoke.\(UUID().uuidString)"
+        let identityMigrationDefaults = UserDefaults(suiteName: identityMigrationSuite)!
+        defer { identityMigrationDefaults.removePersistentDomain(forName: identityMigrationSuite) }
+        identityMigrationDefaults.set(0.61, forKey: "sidepulse.universal-brightness.v1")
+        LegacySidePulsePreferences.copySidePulseValues(
+            from: [
+                "sidepulse.universal-brightness.v1": 0.32,
+                "sidepulse.agent-display-mode.v1": "perAgent",
+                "NSWindow Frame command-center": "private geometry",
+            ],
+            to: identityMigrationDefaults
+        )
+        precondition(identityMigrationDefaults.double(forKey: "sidepulse.universal-brightness.v1") == 0.61)
+        precondition(identityMigrationDefaults.string(forKey: "sidepulse.agent-display-mode.v1") == "perAgent")
+        precondition(identityMigrationDefaults.object(forKey: "NSWindow Frame command-center") == nil)
+
         print("Profile library smoke passed: profiles, display mode, menu icon, universal brightness, and battery preferences persist independently")
     }
 

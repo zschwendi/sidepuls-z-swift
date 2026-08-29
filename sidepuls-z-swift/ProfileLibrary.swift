@@ -241,3 +241,47 @@ enum AppPreferences {
         defaults.set(try? JSONEncoder().encode(settings.normalized), forKey: batteryIndicatorKey)
     }
 }
+
+enum LegacySidePulsePreferences {
+    static let sourceBundleIdentifier = "com.zephyrstudiosllc.sidepuls-z-swift"
+    private static let migrationMarker = "sidepulse.bundle-identity-migrated.v1"
+
+    static func migrateIfNeeded(
+        to defaults: UserDefaults = .standard,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) {
+        guard defaults.object(forKey: migrationMarker) == nil else { return }
+
+        var legacyValues = UserDefaults(
+            suiteName: sourceBundleIdentifier
+        )?.dictionaryRepresentation() ?? [:]
+
+        // Read the persisted domain directly as well. This preserves settings
+        // if cfprefsd still has a stale view after an in-place app replacement.
+        let legacyURL = homeDirectory
+            .appending(path: "Library/Preferences")
+            .appending(path: "\(sourceBundleIdentifier).plist")
+        if let data = try? Data(contentsOf: legacyURL),
+           let persisted = try? PropertyListSerialization.propertyList(
+               from: data,
+               options: [],
+               format: nil
+           ) as? [String: Any]
+        {
+            legacyValues.merge(persisted) { _, persistedValue in persistedValue }
+        }
+
+        copySidePulseValues(from: legacyValues, to: defaults)
+        defaults.set(true, forKey: migrationMarker)
+    }
+
+    static func copySidePulseValues(
+        from legacyValues: [String: Any],
+        to defaults: UserDefaults
+    ) {
+        for (key, value) in legacyValues where key.hasPrefix("sidepulse.") {
+            guard key != migrationMarker, defaults.object(forKey: key) == nil else { continue }
+            defaults.set(value, forKey: key)
+        }
+    }
+}
