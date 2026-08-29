@@ -43,6 +43,7 @@ final class CommandCenterStore {
     var selectedProfileID = LightingProfile.factoryDefault.id
     var selectedState: AgentState = .working
     var agents: [AgentSession]
+    var agentSignalHistory: [AgentSignalHistoryEntry] = []
     var integrations: [AgentIntegrationStatus] = AgentProvider.allCases
         .filter { $0 != .unknown }
         .map {
@@ -108,6 +109,7 @@ final class CommandCenterStore {
     @ObservationIgnored private var nearbyService: NearbySidePulseService?
     @ObservationIgnored private var nearbyStaleMonitor: Timer?
     @ObservationIgnored private var runtime: NativeAgentRuntime?
+    @ObservationIgnored private var agentSignalHistoryLedger = AgentSignalHistoryLedger.load()
     @ObservationIgnored private var proHardware: SidePulseHardwareController?
     @ObservationIgnored private var dotHardware: SidePulseHardwareController?
     @ObservationIgnored private let ejectGuard = SidePulseEjectGuard()
@@ -176,6 +178,7 @@ final class CommandCenterStore {
                 message: nil
             ),
         ]
+        agentSignalHistory = agentSignalHistoryLedger.entries
         recompile()
         refreshLaunchAtLoginStatus()
         startNativeRuntime()
@@ -525,6 +528,14 @@ final class CommandCenterStore {
         if agent.isAcknowledgableTerminalAlert {
             runtime?.acknowledgeTerminal(sessionID: agent.id)
         }
+        openAgentDestination(agent)
+    }
+
+    func openHistoricalAgent(_ agent: AgentSession) {
+        openAgentDestination(agent)
+    }
+
+    private func openAgentDestination(_ agent: AgentSession) {
         guard let destination = AgentOpenRouting.destination(for: agent) else { return }
 
         let workspace = NSWorkspace.shared
@@ -960,6 +971,10 @@ final class CommandCenterStore {
                 if self.isShowingPreviewData {
                     self.resetAllocators()
                     self.isShowingPreviewData = false
+                }
+                if self.agentSignalHistoryLedger.record(agents) {
+                    self.agentSignalHistoryLedger.save()
+                    self.agentSignalHistory = self.agentSignalHistoryLedger.entries
                 }
                 self.agents = agents
                 self.integrations = integrations

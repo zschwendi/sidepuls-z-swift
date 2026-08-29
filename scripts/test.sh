@@ -42,6 +42,14 @@ xcrun swiftc \
 xcrun swiftc \
     sidepuls-z-swift/LEDProgramRenderer.swift \
     sidepuls-z-swift/Models.swift \
+    sidepuls-z-swift/AgentSignalHistory.swift \
+    Tests/AgentSignalHistorySmoke.swift \
+    -o "$test_dir/AgentSignalHistorySmoke"
+"$test_dir/AgentSignalHistorySmoke"
+
+xcrun swiftc \
+    sidepuls-z-swift/LEDProgramRenderer.swift \
+    sidepuls-z-swift/Models.swift \
     sidepuls-z-swift/NearbySignalModels.swift \
     Tests/NearbySignalSmoke.swift \
     -o "$test_dir/NearbySignalSmoke"
@@ -51,6 +59,7 @@ xcrun swiftc \
     sidepuls-z-swift/CodexIPCBridge.swift \
     sidepuls-z-swift/LEDProgramRenderer.swift \
     sidepuls-z-swift/Models.swift \
+    sidepuls-z-swift/AgentSignalHistory.swift \
     sidepuls-z-swift/AgentRuntime.swift \
     Tests/AgentRuntimeSmoke.swift \
     -o "$test_dir/AgentRuntimeSmoke"

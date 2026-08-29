@@ -1403,13 +1403,22 @@ struct ProfileCard: View {
 
 struct AgentsView: View {
     @Bindable var store: CommandCenterStore
+    @State private var showsAllSignalHistory = false
+
+    private var visibleSignalHistory: ArraySlice<AgentSignalHistoryEntry> {
+        store.agentSignalHistory.prefix(
+            showsAllSignalHistory
+                ? store.agentSignalHistory.count
+                : AgentSignalHistoryLedger.defaultVisibleCount
+        )
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Agent Hub").font(.largeTitle.bold())
-                    Text("Every detected session stays available here. Signal Mode only changes the lights.")
+                    Text("Active sessions stay above; recent signals remain below so you can retrace what changed.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -1445,10 +1454,87 @@ struct AgentsView: View {
                         .buttonStyle(.plain)
                         .help("Open \(agent.name)")
                     }
+
+                    signalHistorySection
                 }
                 .padding(.vertical, 2)
             }
             .scrollIndicators(.hidden)
+        }
+    }
+
+    @ViewBuilder
+    private var signalHistorySection: some View {
+        Divider()
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Agent History")
+                    .font(.headline)
+                Text("Recent state and tool changes behind SidePulse signals")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text("\(store.agentSignalHistory.count) / \(AgentSignalHistoryLedger.capacity)")
+                .font(.caption2.monospacedDigit().weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 2)
+
+        if store.agentSignalHistory.isEmpty {
+            Label("History starts with the next detected agent activity.", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        } else {
+            ForEach(visibleSignalHistory) { entry in
+                let agent = entry.agentSnapshot
+                if AgentOpenRouting.destination(for: agent) != nil {
+                    Button {
+                        store.openHistoricalAgent(agent)
+                    } label: {
+                        AgentSignalHistoryRow(
+                            entry: entry,
+                            profile: store.selectedProfile,
+                            isOpenable: true
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open \(entry.name) · \(entry.occurredAt.formatted(date: .abbreviated, time: .standard))")
+                } else {
+                    AgentSignalHistoryRow(
+                        entry: entry,
+                        profile: store.selectedProfile,
+                        isOpenable: false
+                    )
+                    .help("No direct open route is available for \(entry.provider.title)")
+                }
+            }
+
+            if store.agentSignalHistory.count > AgentSignalHistoryLedger.defaultVisibleCount {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showsAllSignalHistory.toggle()
+                    }
+                } label: {
+                    Label(
+                        showsAllSignalHistory
+                            ? "Show latest \(AgentSignalHistoryLedger.defaultVisibleCount)"
+                            : "Show \(store.agentSignalHistory.count - AgentSignalHistoryLedger.defaultVisibleCount) older actions",
+                        systemImage: showsAllSignalHistory ? "chevron.up" : "chevron.down"
+                    )
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -1458,6 +1544,75 @@ struct AgentsView: View {
             .first(where: { $0.agent.id == agent.id })?
             .rangeLabel
             ?? "NOT LIT"
+    }
+}
+
+private struct AgentSignalHistoryRow: View {
+    let entry: AgentSignalHistoryEntry
+    let profile: LightingProfile
+    let isOpenable: Bool
+
+    private var color: Color { Color(hex: profile.style(for: entry.state).colorHex) }
+    private var actionLabel: String {
+        if let toolName = entry.toolName, !toolName.isEmpty {
+            return "\(entry.eventName) · \(toolName)"
+        }
+        return entry.eventName
+    }
+
+    var body: some View {
+        HStack(spacing: 11) {
+            Image(systemName: entry.state.symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 27, height: 27)
+                .background(color.opacity(0.12), in: .rect(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(entry.name)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text(entry.state.title.uppercased())
+                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                        .foregroundStyle(color)
+                }
+                HStack(spacing: 5) {
+                    Text(entry.provider.title)
+                    Text("·")
+                    Text(entry.project)
+                    Text("·")
+                    Text(actionLabel)
+                        .fontDesign(.monospaced)
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(entry.occurredAt, format: .dateTime.month(.abbreviated).day().hour().minute().second())
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Text(entry.occurredAt, style: .relative)
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Image(systemName: isOpenable ? "arrow.up.right" : "minus")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 12)
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: 40)
+        .contentShape(.rect)
+        .glassEffect(
+            .regular.tint(color.opacity(isOpenable ? 0.055 : 0.025)).interactive(isOpenable),
+            in: .rect(cornerRadius: 13)
+        )
     }
 }
 

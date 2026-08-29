@@ -443,7 +443,9 @@ final class NativeAgentRuntime: @unchecked Sendable {
         let integrationSignature = integrations.map {
             "\($0.provider.rawValue):\($0.state.rawValue):\($0.activeSessionCount):\($0.lastEventAt?.timeIntervalSince1970 ?? 0)"
         }.joined(separator: "|")
-        let signature = visible.map { "\($0.id):\($0.state.rawValue):\($0.updatedAt.timeIntervalSince1970)" }.joined(separator: "|")
+        let signature = visible.map {
+            "\($0.id):\($0.state.rawValue):\($0.eventName):\($0.toolName ?? ""):\($0.updatedAt.timeIntervalSince1970)"
+        }.joined(separator: "|")
             + message + integrationSignature
         guard force || signature != lastPublishedSignature else { return }
         lastPublishedSignature = signature
