@@ -522,8 +522,8 @@ final class CommandCenterStore {
     }
 
     func openAgent(_ agent: AgentSession) {
-        if agent.state == .completed {
-            runtime?.acknowledgeCompleted(sessionID: agent.id)
+        if agent.isAcknowledgableTerminalAlert {
+            runtime?.acknowledgeTerminal(sessionID: agent.id)
         }
         guard let destination = AgentOpenRouting.destination(for: agent) else { return }
 

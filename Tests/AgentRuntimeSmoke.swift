@@ -23,7 +23,7 @@ private final class RuntimeProbe: @unchecked Sendable {
 @main
 enum AgentRuntimeSmoke {
     static func main() throws {
-        testCompletionAcknowledgements()
+        testTerminalAcknowledgements()
         testAgentTimelinePolicy()
         testAgentOpenRouting()
         testGrokBotInferenceStability()
@@ -196,12 +196,19 @@ enum AgentRuntimeSmoke {
             "Grok Bot sessions must use the app's supported open route"
         )
 
-        runtime.acknowledgeCompleted(sessionID: "codex:session:\(completedID)")
+        runtime.acknowledgeTerminal(sessionID: "codex:session:\(completedID)")
         Thread.sleep(forTimeInterval: 0.5)
         (agents, integrations) = probe.snapshot()
         precondition(
             !agents.contains(where: { $0.sessionID == completedID }),
             "Explicitly selecting the finished session must acknowledge it"
+        )
+        runtime.acknowledgeTerminal(sessionID: "codex:session:\(abortedID)")
+        Thread.sleep(forTimeInterval: 0.5)
+        (agents, integrations) = probe.snapshot()
+        precondition(
+            !agents.contains(where: { $0.sessionID == abortedID }),
+            "Explicitly selecting a stopped session must acknowledge its red alert"
         )
         runtime.stop()
 
@@ -461,7 +468,7 @@ enum AgentRuntimeSmoke {
         return result
     }
 
-    private static func testCompletionAcknowledgements() {
+    private static func testTerminalAcknowledgements() {
         let finishedAt = Date(timeIntervalSince1970: 1_800_000_000)
         var finished = AgentSession(
             id: "codex:finished",
@@ -476,7 +483,7 @@ enum AgentRuntimeSmoke {
             updatedAt: finishedAt,
             message: nil
         )
-        var acknowledgements = CompletionAcknowledgements()
+        var acknowledgements = TerminalAcknowledgements()
         precondition(acknowledgements.shouldDisplay(finished), "Unacknowledged success must stay visible")
         precondition(acknowledgements.acknowledge([finished], at: finishedAt.addingTimeInterval(1)))
         precondition(!acknowledgements.shouldDisplay(finished), "Acknowledged success must clear")
@@ -484,7 +491,7 @@ enum AgentRuntimeSmoke {
         let suiteName = "sidepulse.runtime-smoke.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         acknowledgements.save(to: defaults)
-        let restored = CompletionAcknowledgements.load(from: defaults)
+        let restored = TerminalAcknowledgements.load(from: defaults)
         defaults.removePersistentDomain(forName: suiteName)
         precondition(!restored.shouldDisplay(finished), "Acknowledgements must survive an app relaunch")
 
@@ -494,6 +501,68 @@ enum AgentRuntimeSmoke {
         finished.state = .completed
         finished.updatedAt = finishedAt.addingTimeInterval(3)
         precondition(acknowledgements.shouldDisplay(finished), "A later completion must become green again")
+
+        var stopped = AgentSession(
+            id: "codex:stopped",
+            provider: .codex,
+            sessionID: "stopped",
+            name: "Stopped run",
+            project: "SidePulse",
+            cwd: nil,
+            state: .error,
+            eventName: "CodexTurnAborted",
+            toolName: nil,
+            updatedAt: finishedAt,
+            message: nil
+        )
+        precondition(acknowledgements.shouldDisplay(stopped), "Unacknowledged stop must stay red")
+        precondition(acknowledgements.acknowledge([stopped], at: finishedAt.addingTimeInterval(1)))
+        precondition(!acknowledgements.shouldDisplay(stopped), "Acknowledged stop must clear")
+
+        stopped.state = .working
+        stopped.updatedAt = finishedAt.addingTimeInterval(2)
+        precondition(acknowledgements.shouldDisplay(stopped), "A resumed run must override the stop acknowledgement")
+        stopped.state = .error
+        stopped.updatedAt = finishedAt.addingTimeInterval(3)
+        precondition(acknowledgements.shouldDisplay(stopped), "A later stop must become red again")
+
+        let waiting = AgentSession(
+            id: "codex:waiting",
+            provider: .codex,
+            sessionID: "waiting",
+            name: "Waiting run",
+            project: "SidePulse",
+            cwd: nil,
+            state: .waiting,
+            eventName: "CodexNeedsInput",
+            toolName: nil,
+            updatedAt: finishedAt,
+            message: nil
+        )
+        precondition(!acknowledgements.acknowledge([waiting]), "Active states must not be acknowledged away")
+        precondition(acknowledgements.shouldDisplay(waiting), "Needs-approval sessions must stay visible")
+
+        let activeError = AgentSession(
+            id: "grok:active-error",
+            provider: .grok,
+            sessionID: "active-error",
+            name: "Active error",
+            project: "SidePulse",
+            cwd: nil,
+            state: .error,
+            eventName: "ProviderError",
+            toolName: nil,
+            updatedAt: finishedAt,
+            message: nil
+        )
+        precondition(
+            !acknowledgements.acknowledge([activeError]),
+            "A nonterminal provider error must not be acknowledged away"
+        )
+        precondition(
+            acknowledgements.shouldDisplay(activeError),
+            "A nonterminal provider error must stay visible"
+        )
     }
 
     private static func testCodexIPCApprovalSignal() throws {

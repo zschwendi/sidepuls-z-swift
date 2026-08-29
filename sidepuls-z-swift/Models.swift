@@ -228,6 +228,11 @@ struct AgentSession: Identifiable, Codable, Hashable, Sendable {
         if let toolName, !toolName.isEmpty { return toolName }
         return provider.title
     }
+
+    var isAcknowledgableTerminalAlert: Bool {
+        state == .completed
+            || (provider == .codex && state == .error && eventName == "CodexTurnAborted")
+    }
 }
 
 enum AgentOpenRouting {

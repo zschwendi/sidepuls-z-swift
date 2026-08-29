@@ -1,16 +1,16 @@
 import Darwin
 import Foundation
 
-struct CompletionAcknowledgements: Codable, Sendable {
+struct TerminalAcknowledgements: Codable, Sendable {
     private(set) var acknowledgedAt: [String: Date] = [:]
 
     private static let storageKey = "sidepulse.completion-acknowledgements.v1"
     private static let bootstrapKey = "sidepulse.completion-acknowledgements-bootstrapped.v1"
 
-    static func load(from defaults: UserDefaults = .standard) -> CompletionAcknowledgements {
+    static func load(from defaults: UserDefaults = .standard) -> TerminalAcknowledgements {
         guard let data = defaults.data(forKey: storageKey),
-              let stored = try? JSONDecoder().decode(CompletionAcknowledgements.self, from: data)
-        else { return CompletionAcknowledgements() }
+              let stored = try? JSONDecoder().decode(TerminalAcknowledgements.self, from: data)
+        else { return TerminalAcknowledgements() }
         return stored
     }
 
@@ -36,7 +36,7 @@ struct CompletionAcknowledgements: Codable, Sendable {
         at date: Date = .now
     ) -> Bool {
         var changed = false
-        for session in sessions where session.state == .completed {
+        for session in sessions where session.isAcknowledgableTerminalAlert {
             guard sessionID == nil || session.id == sessionID else { continue }
             let resolvedDate = max(date, session.updatedAt)
             if acknowledgedAt[session.id] != resolvedDate {
@@ -48,7 +48,9 @@ struct CompletionAcknowledgements: Codable, Sendable {
     }
 
     func shouldDisplay(_ session: AgentSession) -> Bool {
-        guard session.state == .completed, let date = acknowledgedAt[session.id] else { return true }
+        guard session.isAcknowledgableTerminalAlert,
+              let date = acknowledgedAt[session.id]
+        else { return true }
         return session.updatedAt > date
     }
 }
@@ -136,7 +138,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
     private var server: LocalUnixEventServer?
     private var timer: DispatchSourceTimer?
     private var sessions: [String: AgentSession] = [:]
-    private var completionAcknowledgements = CompletionAcknowledgements.load()
+    private var terminalAcknowledgements = TerminalAcknowledgements.load()
     private var discoveredKeys: Set<String> = []
     private var discoveredTranscriptURLs: [String: URL] = [:]
     private var cloudKeys: Set<String> = []
@@ -214,15 +216,15 @@ final class NativeAgentRuntime: @unchecked Sendable {
         }
     }
 
-    func acknowledgeCompleted(sessionID: String? = nil) {
+    func acknowledgeTerminal(sessionID: String? = nil) {
         queue.async { [weak self] in
             guard let self else { return }
-            let changed = completionAcknowledgements.acknowledge(
+            let changed = terminalAcknowledgements.acknowledge(
                 Array(sessions.values),
                 sessionID: sessionID
             )
             if changed {
-                completionAcknowledgements.save()
+                terminalAcknowledgements.save()
                 publishLocked(force: true)
             }
         }
@@ -238,7 +240,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
         }
         loadLatestStateLocked(force: true)
         if usesPersistentAppState,
-           completionAcknowledgements.acknowledgeExistingIfNeeded(Array(sessions.values)) {
+           terminalAcknowledgements.acknowledgeExistingIfNeeded(Array(sessions.values)) {
             publishLocked(force: true)
         }
 
@@ -414,7 +416,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
             .filter { session in
                 guard AgentTimelinePolicy.includes(session) else { return false }
                 if session.state == .idle { return false }
-                return completionAcknowledgements.shouldDisplay(session)
+                return terminalAcknowledgements.shouldDisplay(session)
             }
             .sorted {
                 if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
@@ -938,7 +940,9 @@ private extension NativeAgentRuntime {
 
     func shouldContinueTracking(_ session: AgentSession) -> Bool {
         if session.state == .idle { return false }
-        if session.state == .completed { return completionAcknowledgements.shouldDisplay(session) }
+        if session.isAcknowledgableTerminalAlert {
+            return terminalAcknowledgements.shouldDisplay(session)
+        }
         return true
     }
 
