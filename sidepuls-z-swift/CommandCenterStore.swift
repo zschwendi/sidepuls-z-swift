@@ -122,7 +122,7 @@ final class CommandCenterStore {
                 sessionID: "01a03523",
                 name: "Build the SidePulse command center",
                 project: "sidepuls-z-swift",
-                cwd: "/Users/zach/Developer/Xcode Projects/sidepuls-z-swift",
+                cwd: "/Users/example/Developer/SidePulse-Z",
                 state: .toolRunning,
                 eventName: "PreToolUse",
                 toolName: "Xcode Build",

@@ -1,0 +1,16 @@
+SidePulse Z
+Copyright (c) 2026 Zephyr Studios LLC
+
+SidePulse hardware, the SidePulse LED control format, and the original
+SidePulse software were created by Peter Kuhar and InteliWEAR LLC.
+
+Official project: https://sidepulse.io
+Upstream software: https://github.com/inteliwear/sidepulse
+
+The upstream SidePulse software is available under the MIT License with this
+copyright notice:
+
+Copyright (c) 2026 Peter Kuhar
+
+SidePulse Z is an independent community project. It is not affiliated with or
+endorsed by Peter Kuhar or InteliWEAR LLC.

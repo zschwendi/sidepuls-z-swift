@@ -1,0 +1,32 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Run smoke tests
+        run: ./scripts/test.sh
+
+      - name: Build Release app
+        run: |
+          xcodebuild \
+            -project sidepuls-z-swift.xcodeproj \
+            -scheme sidepuls-z-swift \
+            -configuration Release \
+            -derivedDataPath .build \
+            CODE_SIGN_IDENTITY=- \
+            DEVELOPMENT_TEAM= \
+            build

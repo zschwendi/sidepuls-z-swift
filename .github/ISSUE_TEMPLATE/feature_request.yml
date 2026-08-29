@@ -1,0 +1,31 @@
+name: Feature request
+description: Propose a focused SidePulse Z improvement
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What becomes easier or more glanceable if this exists?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the software UI, menu-bar signal, and physical LED behavior separately when relevant.
+    validations:
+      required: true
+  - type: dropdown
+    id: hardware
+    attributes:
+      label: Hardware target
+      options:
+        - SidePulse Pro
+        - SidePulse Dot (experimental)
+        - Menu bar only
+        - Agent Hub only
+        - Multiple targets
+    validations:
+      required: true

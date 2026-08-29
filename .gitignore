@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+
+# Build products
+.build/
+build/
+DerivedData/
+*.dSYM
+*.dSYM.zip
+
+# Local runtime and diagnostics
+*.log
+*.jsonl
+latest.json
+events.sock
+
+# Editor state
+*.swp
+*.orig

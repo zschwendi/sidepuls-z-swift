@@ -601,7 +601,7 @@ enum AgentRuntimeSmoke {
             sessionID: backgroundID,
             name: "memories (01a03f35)",
             message: "User project activity",
-            cwd: "/Users/zach/Developer/memories"
+            cwd: "/Users/example/Developer/memories"
         )))
         precondition(AgentTimelinePolicy.includes(session(
             id: "codex:session:\(backgroundID)",

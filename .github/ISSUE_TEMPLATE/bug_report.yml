@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a reproducible SidePulse Z problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Please remove private task names, transcripts, paths, and credentials before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: Commit or build
+      placeholder: Commit SHA or app build number
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: macOS version, Mac model, SidePulse Pro or Dot
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent provider
+      options:
+        - Codex Desktop
+        - Codex cloud
+        - Grok Bot
+        - Grok hook
+        - Claude hook
+        - Not agent-related
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: What happened, what did you expect, and how can someone reproduce it?
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Physical hardware result
+      description: Describe what the LEDs did. State clearly if no physical device was available.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence
+      description: Add screenshots, a short recording, or redacted diagnostics if useful.
