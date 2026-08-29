@@ -61,10 +61,16 @@ struct ContentView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup {
-            Toggle(isOn: $store.liveOutputEnabled) {
-                Label("Live Output", systemImage: "dot.radiowaves.left.and.right")
+            Button {
+                store.toggleOutputPower()
+            } label: {
+                Image(systemName: "power")
+                    .foregroundStyle(store.outputPowerIsOn ? Color.green : Color.secondary)
             }
-            .toggleStyle(.button)
+            .buttonStyle(.glass)
+            .help(store.outputPowerIsOn ? "Turn off Live Output" : "Turn on Live Output")
+            .accessibilityLabel("Live Output")
+            .accessibilityValue(store.outputPowerIsOn ? "On" : "Off")
         }
     }
 }
@@ -102,7 +108,7 @@ struct CommandCenterHero: View {
 
     private var title: String {
         if !store.device.connected { return "Connect your SidePulse" }
-        if !store.liveOutputEnabled { return "Turn on Live Output" }
+        if !store.outputPowerIsOn { return "Turn on Live Output" }
         if activeCount == 0 { return "Start an agent" }
         if store.agentDisplayMode == .simple, store.aggregateState == .completed { return "Run finished" }
         if finishedPlacement != nil { return "Run finished" }
@@ -113,7 +119,7 @@ struct CommandCenterHero: View {
         if !store.device.connected {
             return "Plug in the device. SidePulse will detect it automatically and show you the exact hardware path."
         }
-        if !store.liveOutputEnabled {
+        if !store.outputPowerIsOn {
             return "The device is connected, but lighting output is paused. Turn it on to mirror active sessions."
         }
         if activeCount == 0 {
@@ -133,13 +139,13 @@ struct CommandCenterHero: View {
     }
 
     private var tint: Color {
-        if !store.device.connected || !store.liveOutputEnabled { return .orange }
+        if !store.device.connected || !store.outputPowerIsOn { return .orange }
         if activeCount == 0 { return .cyan }
         return .green
     }
 
     private var statusLabel: String {
-        if !store.device.connected || !store.liveOutputEnabled { return "ACTION NEEDED" }
+        if !store.device.connected || !store.outputPowerIsOn { return "ACTION NEEDED" }
         if activeCount == 0 { return "READY" }
         if store.agentDisplayMode == .simple, store.aggregateState == .completed { return "READY FOR YOU" }
         if finishedPlacement != nil { return "READY FOR YOU" }
@@ -184,7 +190,7 @@ struct CommandCenterHero: View {
 
                 HStack(spacing: 7) {
                     primaryAction
-                if activeCount > 0, store.device.connected, store.liveOutputEnabled {
+                if activeCount > 0, store.device.connected, store.outputPowerIsOn {
                     Button("Tune signal", systemImage: "paintpalette.fill") {
                         store.selectedState = store.aggregateState == .idle ? .working : store.aggregateState
                         store.selectedSection = .lighting
@@ -206,9 +212,9 @@ struct CommandCenterHero: View {
                 store.selectedSection = .hardware
             }
             .buttonStyle(.glassProminent)
-        } else if !store.liveOutputEnabled {
+        } else if !store.outputPowerIsOn {
             Button("Turn On Live Output", systemImage: "power") {
-                store.liveOutputEnabled = true
+                store.setOutputPower(true)
             }
             .buttonStyle(.glassProminent)
         } else if activeCount == 0 {
@@ -374,8 +380,11 @@ struct SettingsView: View {
                 switch selectedPane {
                 case .general:
                     ScrollView {
-                        SignalModeControl(store: store)
-                            .frame(maxWidth: 420, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 14) {
+                            SignalModeControl(store: store)
+                            NearbyMirroringCard(store: store)
+                        }
+                            .frame(maxWidth: 520, alignment: .leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .scrollIndicators(.hidden)
@@ -388,6 +397,110 @@ struct SettingsView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
+struct NearbyMirroringCard: View {
+    @Bindable var store: CommandCenterStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 11) {
+                Image(systemName: "network")
+                    .font(.headline)
+                    .foregroundStyle(.purple)
+                    .frame(width: 34, height: 34)
+                    .background(.purple.opacity(0.1), in: .rect(cornerRadius: 11))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Nearby Mac Mirroring").font(.headline)
+                    Text(store.nearbyDisplayStatusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 7, height: 7)
+            }
+
+            HStack(spacing: 10) {
+                Text("ROUTE")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Picker("Nearby Mac route", selection: Binding(
+                    get: { store.nearbyMirroringMode },
+                    set: { store.selectNearbyMirroringMode($0) }
+                )) {
+                    ForEach(NearbyMirroringMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 190)
+            }
+
+            if store.nearbyMirroringMode == .followNearbyMac {
+                HStack(spacing: 10) {
+                    Text("SOURCE")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Picker("Nearby Mac", selection: Binding(
+                        get: { store.selectedNearbyPeerID },
+                        set: { store.selectNearbyPeer($0) }
+                    )) {
+                        Text("Choose a Mac").tag(String?.none)
+                        ForEach(store.nearbyPeers) { peer in
+                            Text(peer.displayName).tag(Optional(peer.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 190)
+                }
+            }
+
+            Text(store.nearbyMirroringMode.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if store.nearbyMirroringMode.receivesNearbySignals {
+                HStack(spacing: 6) {
+                    Image(systemName: "desktopcomputer")
+                    Text(store.nearbyPeers.isEmpty
+                        ? "No other SidePulse Macs discovered yet"
+                        : "\(store.nearbyPeers.count) nearby Mac\(store.nearbyPeers.count == 1 ? "" : "s") discovered")
+                    if let lastSignalAt = store.nearbyLastSignalAt {
+                        Text("·")
+                        Text(lastSignalAt, style: .relative)
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            }
+
+            Label(
+                "Local only: shares compiled LED programs, state, and timing—not agent names, messages, projects, or paths.",
+                systemImage: "lock.shield.fill"
+            )
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+        }
+        .padding(20)
+        .glassEffect(.regular.tint(.purple.opacity(0.055)), in: .rect(cornerRadius: 22))
+    }
+
+    private var statusColor: Color {
+        switch store.nearbyMirroringMode {
+        case .off: .secondary
+        case .shareThisMac: .cyan
+        case .followNearbyMac:
+            store.selectedNearbySignalIsFresh ? .green : .orange
+        case .allMacs: .purple
         }
     }
 }
@@ -512,7 +625,7 @@ struct LEDDeckView: View {
                     DisplayLinkedLEDArray(
                         program: store.connectedSoftwareDisplayProgram,
                         ledCount: store.device.ledCount,
-                        clockOrigin: store.device.lastWrite,
+                        clockOrigin: store.softwareDisplayClockOrigin,
                         style: .commandCenter
                     )
                         .frame(
@@ -1417,7 +1530,11 @@ struct HardwareView: View {
             HStack {
                 Text("Hardware").font(.largeTitle.bold())
                 Spacer()
-                Toggle("Live output", isOn: $store.liveOutputEnabled).toggleStyle(.switch)
+                Toggle("Live output", isOn: Binding(
+                    get: { store.outputPowerIsOn },
+                    set: { store.setOutputPower($0) }
+                ))
+                .toggleStyle(.switch)
             }
 
             ForEach(store.hardwareDevices, id: \.path) { device in

@@ -10,6 +10,9 @@ final class MenuBarDotAnimationView: NSView {
     private let pillLayer = CAShapeLayer()
     private var dotLayers: [CAShapeLayer] = []
     private var style: MenuBarIconStyle = .horizontalEight
+    private var lastAppearances: [MenuBarDotAppearance] = []
+    private var sourceIndexGroups: [[Int]] = []
+    private var sourceLEDCount = 0
 
     init() {
         super.init(frame: NSRect(origin: .zero, size: Self.preferredSize))
@@ -78,12 +81,18 @@ final class MenuBarDotAnimationView: NSView {
         style: MenuBarIconStyle,
         sourceColors: [LEDProgramColor]
     ) {
-        let colors = MenuBarDotLayout.colors(for: style, sourceColors: sourceColors)
-
-        let geometryChanged = self.style != style || dotLayers.count != colors.count
+        let groupingChanged = self.style != style || sourceLEDCount != sourceColors.count
+        if groupingChanged {
+            sourceIndexGroups = MenuBarDotLayout.sourceIndices(
+                for: style,
+                ledCount: sourceColors.count
+            )
+            sourceLEDCount = sourceColors.count
+        }
+        let geometryChanged = groupingChanged || dotLayers.count != sourceIndexGroups.count
         self.style = style
-        if dotLayers.count != colors.count {
-            rebuildDots(count: colors.count)
+        if dotLayers.count != sourceIndexGroups.count {
+            rebuildDots(count: sourceIndexGroups.count)
         }
         if geometryChanged {
             needsLayout = true
@@ -93,20 +102,33 @@ final class MenuBarDotAnimationView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for index in dotLayers.indices {
-            let output = colors.indices.contains(index) ? colors[index] : .black
+            var output = LEDProgramColor.black
+            for sourceIndex in sourceIndexGroups[index] where sourceColors.indices.contains(sourceIndex) {
+                let candidate = sourceColors[sourceIndex]
+                if candidate.peak > output.peak {
+                    output = candidate
+                }
+            }
             let appearance = MenuBarDotAppearance.liveArrayMatch(for: output)
+            let previous = lastAppearances.indices.contains(index) ? lastAppearances[index] : nil
+            guard previous != appearance else { continue }
             let visible = appearance.opacity > 0
             let dot = dotLayers[index]
-            dot.isHidden = !visible
-            if visible {
+            if previous?.opacity != appearance.opacity {
+                dot.isHidden = !visible
                 dot.opacity = Float(appearance.opacity)
-                dot.fillColor = NSColor(
-                    srgbRed: appearance.color.red,
-                    green: appearance.color.green,
-                    blue: appearance.color.blue,
-                    alpha: 1
-                ).cgColor
             }
+            if visible {
+                if previous?.color != appearance.color {
+                    dot.fillColor = NSColor(
+                        srgbRed: appearance.color.red,
+                        green: appearance.color.green,
+                        blue: appearance.color.blue,
+                        alpha: 1
+                    ).cgColor
+                }
+            }
+            lastAppearances[index] = appearance
         }
         CATransaction.commit()
     }
@@ -114,6 +136,10 @@ final class MenuBarDotAnimationView: NSView {
     private func rebuildDots(count: Int) {
         dotLayers.forEach { $0.removeFromSuperlayer() }
         dotLayers.removeAll(keepingCapacity: true)
+        lastAppearances = Array(
+            repeating: MenuBarDotAppearance(color: .black, opacity: -1),
+            count: count
+        )
 
         for _ in 0..<count {
             let dot = CAShapeLayer()

@@ -32,6 +32,9 @@ private final class SidePulseMenuBarController: NSObject {
     private var renderedProgramText = ""
     private var renderedLEDCount = 0
     private var renderedProgram: LEDFirmwareProgram?
+    private var renderedClockOrigin: Date?
+    private var renderedIconStyle: MenuBarIconStyle = .horizontalEight
+    private var statusItemVisibilityObservation: NSKeyValueObservation?
 
     init(store: CommandCenterStore) {
         self.store = store
@@ -85,11 +88,21 @@ private final class SidePulseMenuBarController: NSObject {
             displayLink.add(to: .main, forMode: .common)
             self.displayLink = displayLink
         }
-        refreshIcon()
+        statusItemVisibilityObservation = statusItem.observe(
+            \.isVisible,
+            options: [.initial, .new]
+        ) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.refreshIconSource()
+            }
+        }
+        store.setSoftwareDisplayChangeHandler { [weak self] in
+            self?.refreshIconSource()
+        }
     }
 
     @objc private func displayLinkDidFire(_ displayLink: CADisplayLink) {
-        refreshIcon()
+        renderIconFrame()
     }
 
     @objc private func togglePopover(_ sender: NSStatusBarButton) {
@@ -101,7 +114,7 @@ private final class SidePulseMenuBarController: NSObject {
         }
     }
 
-    private func refreshIcon() {
+    private func refreshIconSource() {
         guard let button = statusItem.button else { return }
         let program = store.softwareDisplayProgram
         let ledCount = store.device.ledCount
@@ -113,19 +126,29 @@ private final class SidePulseMenuBarController: NSObject {
             renderedLEDCount = ledCount
             renderedProgram = LEDFirmwareProgram(program: program, ledCount: ledCount)
         }
-        let elapsed = store.device.connected
-            ? store.device.lastWrite.map { max(0, Date.now.timeIntervalSince($0)) }
-                ?? Date.now.timeIntervalSinceReferenceDate
-            : Date.now.timeIntervalSinceReferenceDate
-        guard let frame = renderedProgram?.frame(at: elapsed) else { return }
-        iconView.render(
-            style: store.menuBarIconStyle,
-            sourceColors: frame.colors
-        )
+        renderedClockOrigin = store.softwareDisplayClockOrigin
+        renderedIconStyle = store.menuBarIconStyle
+        renderIconFrame()
         let toolTip = "SidePulse · \(store.agents.count) session\(store.agents.count == 1 ? "" : "s")"
         if button.toolTip != toolTip {
             button.toolTip = toolTip
         }
+    }
+
+    private func renderIconFrame() {
+        guard statusItem.isVisible else {
+            displayLink?.isPaused = true
+            return
+        }
+        let elapsed = renderedClockOrigin
+            .map { max(0, Date.now.timeIntervalSince($0)) }
+            ?? Date.now.timeIntervalSinceReferenceDate
+        guard let frame = renderedProgram?.frame(at: elapsed) else { return }
+        iconView.render(
+            style: renderedIconStyle,
+            sourceColors: frame.colors
+        )
+        displayLink?.isPaused = !(renderedProgram?.needsAnimationFrame(at: elapsed) ?? false)
     }
 
     private func openCommandCenter() {
@@ -158,28 +181,32 @@ struct SidePulseMenuBarView: View {
                 Text("\(store.agents.count) session\(store.agents.count == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Button {
+                    store.toggleOutputPower()
+                } label: {
+                    Image(systemName: "power")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(store.outputPowerIsOn ? Color.green : Color.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            (store.outputPowerIsOn ? Color.green : Color.secondary)
+                                .opacity(0.12),
+                            in: .circle
+                        )
+                }
+                .buttonStyle(.plain)
+                .help(store.outputPowerIsOn ? "Turn off Live Output" : "Turn on Live Output")
+                .accessibilityLabel("Live Output")
+                .accessibilityValue(store.outputPowerIsOn ? "On" : "Off")
             }
 
             HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("LIVE ARRAY")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.tertiary)
+                VStack(alignment: .leading, spacing: 0) {
                     MenuBarPhysicalArrayView(store: store)
                 }
                 .frame(width: 64, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("AGENT HUB")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.tertiary)
-                        Spacer()
-                        Text(store.agentDisplayMode == .simple ? "ONE SIGNAL" : "PER AGENT")
-                            .font(.system(size: 9, weight: .bold, design: .rounded))
-                            .foregroundStyle(.secondary)
-                    }
-
+                VStack(alignment: .leading, spacing: 0) {
                     if store.agents.isEmpty {
                         Label("No detected sessions", systemImage: "moon.stars")
                             .font(.caption)
@@ -302,7 +329,7 @@ private struct MenuBarPhysicalArrayView: View {
         DisplayLinkedLEDArray(
             program: program,
             ledCount: store.device.ledCount,
-            clockOrigin: store.device.connected ? store.device.lastWrite : nil,
+            clockOrigin: store.softwareDisplayClockOrigin,
             style: .menuBar
         )
             .frame(

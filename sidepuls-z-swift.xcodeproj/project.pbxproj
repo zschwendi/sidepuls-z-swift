@@ -10,9 +10,22 @@
 		92F01EC1303CE42300957296 /* sidepuls-z-swift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "sidepuls-z-swift.app"; path = SidePulse.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A14C5B0131B5000000000001 /* Exceptions for "sidepuls-z-swift" folder in "sidepuls-z-swift" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 92F01EC0303CE42300957296 /* sidepuls-z-swift */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		92F01EC3303CE42300957296 /* sidepuls-z-swift */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A14C5B0131B5000000000001 /* Exceptions for "sidepuls-z-swift" folder in "sidepuls-z-swift" target */,
+			);
 			path = "sidepuls-z-swift";
 			sourceTree = "<group>";
 		};
@@ -250,20 +263,22 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = NO;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "sidepuls-z-swift/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "SidePulse Command Center";
 				INFOPLIST_KEY_CFBundleName = SidePulse;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Zephyr Studios LLC";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "SidePulse discovers nearby Macs so you can mirror agent-status light signals on your local network.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zephyrstudiosllc.sidepulse-z";
 				PRODUCT_NAME = SidePulse;
 				REGISTER_APP_GROUPS = YES;
@@ -283,20 +298,22 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = NO;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "sidepuls-z-swift/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "SidePulse Command Center";
 				INFOPLIST_KEY_CFBundleName = SidePulse;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Zephyr Studios LLC";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "SidePulse discovers nearby Macs so you can mirror agent-status light signals on your local network.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zephyrstudiosllc.sidepulse-z";
 				PRODUCT_NAME = SidePulse;
 				REGISTER_APP_GROUPS = YES;

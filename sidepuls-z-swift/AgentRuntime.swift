@@ -116,6 +116,12 @@ enum AgentTimelinePolicy {
 
 final class NativeAgentRuntime: @unchecked Sendable {
     typealias UpdateHandler = @Sendable ([AgentSession], String, [AgentIntegrationStatus]) -> Void
+    private static let transcriptTailBytes: UInt64 = 196_608
+    private static let grokBotBase32Values = Dictionary(
+        uniqueKeysWithValues: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".enumerated().map {
+            ($0.element, $0.offset)
+        }
+    )
 
     private let queue = DispatchQueue(label: "io.sidepulse.native-agent-runtime")
     private let cloudQueue = DispatchQueue(label: "io.sidepulse.codex-cloud-discovery", qos: .utility)
@@ -141,6 +147,8 @@ final class NativeAgentRuntime: @unchecked Sendable {
     private var threadNames: [String: String] = [:]
     private var threadIndexModification: Date?
     private var codexMetadataCache: [URL: [String: Any]] = [:]
+    private var codexTranscriptCache: [URL: CodexTranscriptSnapshot] = [:]
+    private var observedCodexThreadIDs = Set<String>()
     private var grokBotDiscoveredKeys: Set<String> = []
     private var grokBotDocumentCache: [URL: GrokBotCachedDocument] = [:]
     private var grokBotLastEventAt: Date?
@@ -595,7 +603,10 @@ private extension NativeAgentRuntime {
             guard let session = sessions[key], shouldContinueTracking(session) else { return nil }
             return url
         }
-        for url in Set(recentURLs + retainedURLs) {
+        let candidateURLs = Set(recentURLs + retainedURLs)
+        codexMetadataCache = codexMetadataCache.filter { candidateURLs.contains($0.key) }
+        codexTranscriptCache = codexTranscriptCache.filter { candidateURLs.contains($0.key) }
+        for url in candidateURLs {
             guard let session = codexSession(from: url, now: now) else { continue }
             discovered[session.id] = session
             transcriptURLs[session.id] = url
@@ -620,7 +631,11 @@ private extension NativeAgentRuntime {
             return (key, url)
         })
         discoveredKeys = newKeys
-        codexIPCBridge.observe(threadIDs: Set(discovered.values.map(\.sessionID)))
+        let threadIDs = Set(discovered.values.map(\.sessionID))
+        if threadIDs != observedCodexThreadIDs {
+            observedCodexThreadIDs = threadIDs
+            codexIPCBridge.observe(threadIDs: threadIDs)
+        }
 
         if changed {
             if ownsSocket { writeLatestStateLocked() }
@@ -665,6 +680,10 @@ private extension NativeAgentRuntime {
             }
         }
         grokBotLastEventAt = newestModification
+        let currentDocumentURLs = Set(transcriptURLs.values).union(rosterURL.map { [$0] } ?? [])
+        grokBotDocumentCache = grokBotDocumentCache.filter {
+            currentDocumentURLs.contains($0.key)
+        }
 
         guard let rosterURL,
               let roster = readGrokBotDocument(rosterURL),
@@ -763,14 +782,12 @@ private extension NativeAgentRuntime {
 
     func grokBotPersistenceKey(for url: URL) -> String? {
         let encoded = url.deletingPathExtension().lastPathComponent.uppercased()
-        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
-        let values = Dictionary(uniqueKeysWithValues: alphabet.enumerated().map { ($0.element, $0.offset) })
         var buffer = 0
         var bitCount = 0
         var bytes: [UInt8] = []
 
         for character in encoded where character != "=" {
-            guard let value = values[character] else { return nil }
+            guard let value = Self.grokBotBase32Values[character] else { return nil }
             buffer = (buffer << 5) | value
             bitCount += 5
             if bitCount >= 8 {
@@ -980,7 +997,7 @@ private extension NativeAgentRuntime {
                 toolName: "Waiting for you"
             )
         } else {
-            activity = inferCodexActivity(snapshot.records)
+            activity = snapshot.activity
         }
         let updatedAt = snapshot.modifiedAt > now ? now : snapshot.modifiedAt
 
@@ -1018,11 +1035,21 @@ private extension NativeAgentRuntime {
     }
 
     func readCodexTranscript(_ url: URL) -> CodexTranscriptSnapshot? {
+        guard let values = try? url.resourceValues(
+                  forKeys: [.contentModificationDateKey, .fileSizeKey]
+              ),
+              let modifiedAt = values.contentModificationDate,
+              let fileSize = values.fileSize
+        else { return nil }
+        if let cached = codexTranscriptCache[url],
+           cached.modifiedAt == modifiedAt,
+           cached.fileSize == fileSize {
+            return cached
+        }
+
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-
-        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
-              let modifiedAt = values.contentModificationDate,
+        guard
               let size = try? handle.seekToEnd()
         else { return nil }
 
@@ -1039,15 +1066,21 @@ private extension NativeAgentRuntime {
             codexMetadataCache[url] = parsedMetadata
         }
 
-        let tailStart = size > 196_608 ? size - 196_608 : 0
+        let tailStart = size > Self.transcriptTailBytes ? size - Self.transcriptTailBytes : 0
         try? handle.seek(toOffset: tailStart)
         let tail = (try? handle.readToEnd()) ?? Data()
 
-        return CodexTranscriptSnapshot(
+        let snapshot = CodexTranscriptSnapshot(
             metadata: metadata,
-            records: jsonLineObjects(in: tail, dropFirstPartialLine: tailStart > 0),
-            modifiedAt: modifiedAt
+            activity: inferCodexActivity(
+                in: tail,
+                dropFirstPartialLine: tailStart > 0
+            ),
+            modifiedAt: modifiedAt,
+            fileSize: Int(size)
         )
+        codexTranscriptCache[url] = snapshot
+        return snapshot
     }
 
     func readFirstJSONObject(from handle: FileHandle) -> [String: Any]? {
@@ -1090,49 +1123,76 @@ private extension NativeAgentRuntime {
 
     func inferCodexActivity(_ records: [[String: Any]]) -> CodexActivity {
         for record in records.reversed() {
-            guard let recordType = record["type"] as? String,
-                  let payload = record["payload"] as? [String: Any]
-            else { continue }
-
-            if recordType == "event_msg" {
-                switch payload["type"] as? String {
-                case "task_complete":
-                    return CodexActivity(state: .completed, eventName: "CodexTurnComplete", toolName: nil)
-                case "turn_aborted":
-                    return CodexActivity(state: .error, eventName: "CodexTurnAborted", toolName: nil)
-                case "task_started":
-                    return CodexActivity(state: .working, eventName: "CodexTurnStarted", toolName: nil)
-                default:
-                    continue
-                }
-            }
-
-            guard recordType == "response_item", let itemType = payload["type"] as? String else { continue }
-            switch itemType {
-            case "custom_tool_call", "function_call", "local_shell_call":
-                let rawName = string(in: payload, keys: ["name", "tool_name"]) ?? "Tool"
-                if rawName == "request_user_input" {
-                    return CodexActivity(state: .waiting, eventName: "CodexNeedsInput", toolName: "Waiting for you")
-                }
-                return CodexActivity(
-                    state: .toolRunning,
-                    eventName: "CodexToolCall",
-                    toolName: friendlyToolName(rawName)
-                )
-            case "custom_tool_call_output", "function_call_output", "local_shell_call_output", "reasoning":
-                return CodexActivity(state: .working, eventName: "CodexWorking", toolName: nil)
-            case "message":
-                let role = payload["role"] as? String
-                let phase = payload["phase"] as? String
-                if role == "assistant", phase == "final" {
-                    return CodexActivity(state: .completed, eventName: "CodexTurnComplete", toolName: nil)
-                }
-                return CodexActivity(state: .working, eventName: "CodexMessage", toolName: nil)
-            default:
-                continue
-            }
+            if let activity = codexActivity(in: record) { return activity }
         }
         return CodexActivity(state: .working, eventName: "CodexActivity", toolName: nil)
+    }
+
+    func inferCodexActivity(in data: Data, dropFirstPartialLine: Bool) -> CodexActivity {
+        var start = data.startIndex
+        if dropFirstPartialLine, let firstNewline = data.firstIndex(of: 0x0A) {
+            start = data.index(after: firstNewline)
+        }
+        var end = data.endIndex
+        if data.last != 0x0A, let lastNewline = data.lastIndex(of: 0x0A) {
+            end = data.index(after: lastNewline)
+        }
+        guard start < end else {
+            return CodexActivity(state: .working, eventName: "CodexActivity", toolName: nil)
+        }
+
+        let lines = data[start..<end].split(separator: 0x0A, omittingEmptySubsequences: true)
+        for line in lines.reversed() {
+            guard let record = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  let activity = codexActivity(in: record)
+            else { continue }
+            return activity
+        }
+        return CodexActivity(state: .working, eventName: "CodexActivity", toolName: nil)
+    }
+
+    private func codexActivity(in record: [String: Any]) -> CodexActivity? {
+        guard let recordType = record["type"] as? String,
+              let payload = record["payload"] as? [String: Any]
+        else { return nil }
+
+        if recordType == "event_msg" {
+            switch payload["type"] as? String {
+            case "task_complete":
+                return CodexActivity(state: .completed, eventName: "CodexTurnComplete", toolName: nil)
+            case "turn_aborted":
+                return CodexActivity(state: .error, eventName: "CodexTurnAborted", toolName: nil)
+            case "task_started":
+                return CodexActivity(state: .working, eventName: "CodexTurnStarted", toolName: nil)
+            default:
+                return nil
+            }
+        }
+
+        guard recordType == "response_item", let itemType = payload["type"] as? String else { return nil }
+        switch itemType {
+        case "custom_tool_call", "function_call", "local_shell_call":
+            let rawName = string(in: payload, keys: ["name", "tool_name"]) ?? "Tool"
+            if rawName == "request_user_input" {
+                return CodexActivity(state: .waiting, eventName: "CodexNeedsInput", toolName: "Waiting for you")
+            }
+            return CodexActivity(
+                state: .toolRunning,
+                eventName: "CodexToolCall",
+                toolName: friendlyToolName(rawName)
+            )
+        case "custom_tool_call_output", "function_call_output", "local_shell_call_output", "reasoning":
+            return CodexActivity(state: .working, eventName: "CodexWorking", toolName: nil)
+        case "message":
+            let role = payload["role"] as? String
+            let phase = payload["phase"] as? String
+            if role == "assistant", phase == "final" {
+                return CodexActivity(state: .completed, eventName: "CodexTurnComplete", toolName: nil)
+            }
+            return CodexActivity(state: .working, eventName: "CodexMessage", toolName: nil)
+        default:
+            return nil
+        }
     }
 
     func friendlyToolName(_ rawName: String) -> String {
@@ -1345,8 +1405,9 @@ private extension NativeAgentRuntime {
 
 private struct CodexTranscriptSnapshot {
     var metadata: [String: Any]
-    var records: [[String: Any]]
+    var activity: CodexActivity
     var modifiedAt: Date
+    var fileSize: Int
 }
 
 private struct CodexActivity {

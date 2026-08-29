@@ -99,6 +99,14 @@ enum SceneCompilerSmoke {
             ).opacity == 1,
             "A bright live-array LED must remain fully legible in the menu bar"
         )
+        let staticRenderer = LEDFirmwareProgram(program: "0:#00FF00", ledCount: 8)
+        precondition(staticRenderer.needsAnimationFrame(at: 0))
+        precondition(!staticRenderer.needsAnimationFrame(at: 1))
+        let repeatingRenderer = LEDFirmwareProgram(
+            program: "off\n0:#FF00FF 1s pulse\nrepeat",
+            ledCount: 8
+        )
+        precondition(repeatingRenderer.needsAnimationFrame(at: 60))
         precondition(SidePulseHardwareController.refreshInterval(for: "off") == nil)
         precondition(SidePulseHardwareController.refreshInterval(for: "0:#00FF00") == 15)
         precondition(

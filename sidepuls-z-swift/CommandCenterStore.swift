@@ -67,6 +67,11 @@ final class CommandCenterStore {
     var agentDisplayMode = AppPreferences.agentDisplayMode()
     var menuBarIconStyle = AppPreferences.menuBarIconStyle()
     var universalBrightness = AppPreferences.universalBrightness()
+    var nearbyMirroringMode = AppPreferences.nearbyMirroringMode()
+    var selectedNearbyPeerID = AppPreferences.selectedNearbyPeerID()
+    var nearbyPeers: [NearbySignalPeer] = []
+    var nearbyStatusMessage = "Mirroring is off"
+    var nearbyLastSignalAt: Date?
     var launchAtLoginEnabled = false
     var launchAtLoginMessage: String?
     var lidIsClosed: Bool?
@@ -89,6 +94,16 @@ final class CommandCenterStore {
     private let compiler = LightingSceneCompiler()
     @ObservationIgnored private var proScene = CompiledScene(program: "off", slots: [])
     @ObservationIgnored private var dotScene = CompiledScene(program: "off", slots: [])
+    @ObservationIgnored private var routedProScene = CompiledScene(program: "off", slots: [])
+    @ObservationIgnored private var routedDotScene = CompiledScene(program: "off", slots: [])
+    @ObservationIgnored private var routedClockOrigin = Date.now
+    @ObservationIgnored private var routedSourceNodeID: String?
+    @ObservationIgnored private let nearbyNodeID = AppPreferences.nearbyNodeID()
+    @ObservationIgnored private var localSignalSequence: UInt64 = 0
+    @ObservationIgnored private var localProgramStartedAt = Date.now
+    @ObservationIgnored private var receivedNearbySignals: [String: ReceivedNearbySignal] = [:]
+    @ObservationIgnored private var nearbyService: NearbySidePulseService?
+    @ObservationIgnored private var nearbyStaleMonitor: Timer?
     @ObservationIgnored private var runtime: NativeAgentRuntime?
     @ObservationIgnored private var proHardware: SidePulseHardwareController?
     @ObservationIgnored private var dotHardware: SidePulseHardwareController?
@@ -101,6 +116,7 @@ final class CommandCenterStore {
     @ObservationIgnored private var focusMonitor: Timer?
     @ObservationIgnored private var hasObservedFocusContext = false
     @ObservationIgnored private var lastObservedFocusProfileID: UUID?
+    @ObservationIgnored private var softwareDisplayChangeHandler: (@MainActor @Sendable () -> Void)?
 
     init() {
         if let saved = ProfileLibrary.load(), !saved.profiles.isEmpty {
@@ -159,6 +175,7 @@ final class CommandCenterStore {
         recompile()
         refreshLaunchAtLoginStatus()
         startNativeRuntime()
+        startNearbySignalService()
         startProfileAutomation()
     }
 
@@ -167,8 +184,15 @@ final class CommandCenterStore {
     }
 
     var softwareDisplayProgram: String {
-        let program = device.connected ? device.sourceProgram : scene.program
+        let routedScene = device.ledCount == SidePulseDeviceKind.dot.ledCount
+            ? routedDotScene
+            : routedProScene
+        let program = device.connected ? device.sourceProgram : routedScene.program
         return LEDProgramOutputCalibration.settingBrightness(in: program, to: 255)
+    }
+
+    var softwareDisplayClockOrigin: Date? {
+        device.connected ? device.lastWrite : routedClockOrigin
     }
 
     var connectedSoftwareDisplayProgram: String {
@@ -181,6 +205,16 @@ final class CommandCenterStore {
 
     var lightingAgents: [AgentSession] {
         AgentDisplayPolicy.lightingSessions(from: agents, mode: agentDisplayMode)
+    }
+
+    var selectedNearbyPeer: NearbySignalPeer? {
+        guard let selectedNearbyPeerID else { return nil }
+        return nearbyPeers.first(where: { $0.id == selectedNearbyPeerID })
+    }
+
+    var routedSignalSourceName: String {
+        guard let routedSourceNodeID, routedSourceNodeID != nearbyNodeID else { return "This Mac" }
+        return nearbyPeers.first(where: { $0.id == routedSourceNodeID })?.displayName ?? "Nearby Mac"
     }
 
     func selectProfile(_ id: UUID) {
@@ -206,6 +240,41 @@ final class CommandCenterStore {
         guard menuBarIconStyle != style else { return }
         menuBarIconStyle = style
         AppPreferences.saveMenuBarIconStyle(style)
+        notifySoftwareDisplayChanged()
+    }
+
+    func setSoftwareDisplayChangeHandler(
+        _ handler: (@MainActor @Sendable () -> Void)?
+    ) {
+        softwareDisplayChangeHandler = handler
+        handler?()
+    }
+
+    func selectNearbyMirroringMode(_ mode: NearbyMirroringMode) {
+        guard nearbyMirroringMode != mode else { return }
+        nearbyMirroringMode = mode
+        AppPreferences.saveNearbyMirroringMode(mode)
+        if mode == .followNearbyMac,
+           selectedNearbyPeerID == nil,
+           let firstPeer = nearbyPeers.first {
+            selectedNearbyPeerID = firstPeer.id
+            AppPreferences.saveSelectedNearbyPeerID(firstPeer.id)
+        }
+        if mode == .off {
+            receivedNearbySignals.removeAll(keepingCapacity: true)
+        }
+        refreshNearbyLastSignalAt()
+        configureNearbySignalService()
+        refreshRoutedOutput()
+    }
+
+    func selectNearbyPeer(_ peerID: String?) {
+        guard selectedNearbyPeerID != peerID else { return }
+        selectedNearbyPeerID = peerID
+        AppPreferences.saveSelectedNearbyPeerID(peerID)
+        refreshNearbyLastSignalAt()
+        configureNearbySignalService()
+        refreshRoutedOutput()
     }
 
     func setUniversalBrightness(_ brightness: Double) {
@@ -214,6 +283,53 @@ final class CommandCenterStore {
         universalBrightness = clamped
         AppPreferences.saveUniversalBrightness(clamped)
         syncHardwareOutput()
+    }
+
+    var outputPowerIsOn: Bool {
+        liveOutputEnabled && universalBrightness > 0.000_1
+    }
+
+    func setOutputPower(_ enabled: Bool) {
+        if enabled {
+            let restoresDefaultBrightness = universalBrightness <= 0.000_1
+            if restoresDefaultBrightness {
+                universalBrightness = 0.5
+                AppPreferences.saveUniversalBrightness(0.5)
+            }
+            if !liveOutputEnabled {
+                liveOutputEnabled = true
+            } else if restoresDefaultBrightness {
+                syncHardwareOutput()
+            }
+        } else if liveOutputEnabled {
+            liveOutputEnabled = false
+        }
+    }
+
+    func toggleOutputPower() {
+        setOutputPower(!outputPowerIsOn)
+    }
+
+    var selectedNearbySignalIsFresh: Bool {
+        guard let selectedNearbyPeerID,
+              let signal = receivedNearbySignals[selectedNearbyPeerID]
+        else { return false }
+        return signal.isFresh(at: .now)
+    }
+
+    var nearbyDisplayStatusMessage: String {
+        guard nearbyMirroringMode == .followNearbyMac,
+              let selectedNearbyPeerID
+        else { return nearbyStatusMessage }
+
+        let name = nearbyPeers.first(where: { $0.id == selectedNearbyPeerID })?.displayName
+            ?? "selected Mac"
+        if selectedNearbySignalIsFresh {
+            return "Following \(name)"
+        }
+        return nearbyStatusMessage.hasPrefix("Connected to ")
+            ? "Connected to \(name) · waiting for a fresh signal…"
+            : nearbyStatusMessage
     }
 
     var launchAtLoginNeedsApproval: Bool {
@@ -397,20 +513,187 @@ final class CommandCenterStore {
 
     func recompile() {
         let displayedAgents = lightingAgents
-        proScene = compiler.compile(
+        let nextProScene = compiler.compile(
             profile: selectedProfile,
             agents: displayedAgents,
             allocator: &proAllocator,
             ledCount: SidePulseDeviceKind.pro.ledCount
         )
-        dotScene = compiler.compile(
+        let nextDotScene = compiler.compile(
             profile: selectedProfile,
             agents: displayedAgents,
             allocator: &dotAllocator,
             ledCount: SidePulseDeviceKind.dot.ledCount
         )
+        if nextProScene.program != proScene.program || nextDotScene.program != dotScene.program {
+            localProgramStartedAt = .now
+            localSignalSequence &+= 1
+        }
+        proScene = nextProScene
+        dotScene = nextDotScene
         scene = proDevice.connected || !dotDevice.connected ? proScene : dotScene
+        publishLocalSignal()
+        refreshRoutedOutput()
+    }
+
+    private func localSignalFrame(sentAt: Date = .now) -> NearbySignalFrame {
+        NearbySignalFrame(
+            sourceNodeID: nearbyNodeID,
+            sequence: localSignalSequence,
+            generatedAt: localProgramStartedAt,
+            sentAt: sentAt,
+            programStartedAt: localProgramStartedAt,
+            aggregateState: aggregateState,
+            hasVisibleActivity: !lightingAgents.isEmpty,
+            proProgram: proScene.program,
+            dotProgram: dotScene.program
+        )
+    }
+
+    private func publishLocalSignal() {
+        nearbyService?.updateLocalFrame(localSignalFrame())
+    }
+
+    private func refreshRoutedOutput(now: Date = .now) {
+        let localFrame = localSignalFrame(sentAt: now)
+        guard let routed = NearbySignalRouter.route(
+            mode: nearbyMirroringMode,
+            selectedPeerID: selectedNearbyPeerID,
+            localFrame: localFrame,
+            receivedSignals: receivedNearbySignals,
+            now: now
+        ) else {
+            routedProScene = CompiledScene(program: "off", slots: [])
+            routedDotScene = CompiledScene(program: "off", slots: [])
+            routedClockOrigin = now
+            routedSourceNodeID = nil
+            notifySoftwareDisplayChanged()
+            syncHardwareOutput()
+            return
+        }
+
+        let isLocal = routed.frame.sourceNodeID == nearbyNodeID
+        routedProScene = CompiledScene(
+            program: routed.frame.proProgram,
+            slots: isLocal ? proScene.slots : []
+        )
+        routedDotScene = CompiledScene(
+            program: routed.frame.dotProgram,
+            slots: isLocal ? dotScene.slots : []
+        )
+        routedClockOrigin = routed.clockOrigin
+        routedSourceNodeID = routed.frame.sourceNodeID
+        notifySoftwareDisplayChanged()
         syncHardwareOutput()
+    }
+
+    private func notifySoftwareDisplayChanged() {
+        softwareDisplayChangeHandler?()
+    }
+
+    private func startNearbySignalService() {
+        let displayName = Host.current().localizedName
+            ?? ProcessInfo.processInfo.hostName
+        let service = NearbySidePulseService(
+            nodeID: nearbyNodeID,
+            displayName: displayName,
+            onPeers: { [weak self] peers in
+                Task { @MainActor [weak self] in
+                    self?.handleNearbyPeers(peers)
+                }
+            },
+            onSignal: { [weak self] signal in
+                Task { @MainActor [weak self] in
+                    self?.handleNearbySignal(signal)
+                }
+            },
+            onStatus: { [weak self] status in
+                Task { @MainActor [weak self] in
+                    self?.nearbyStatusMessage = status
+                }
+            }
+        )
+        nearbyService = service
+        configureNearbySignalService()
+        publishLocalSignal()
+    }
+
+    private func configureNearbySignalService() {
+        nearbyService?.configure(
+            mode: nearbyMirroringMode,
+            selectedPeerID: selectedNearbyPeerID
+        )
+        updateNearbyStaleMonitor()
+    }
+
+    private func updateNearbyStaleMonitor() {
+        if nearbyMirroringMode.receivesNearbySignals {
+            guard nearbyStaleMonitor == nil else { return }
+            nearbyStaleMonitor = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) {
+                [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.pruneStaleNearbySignals()
+                }
+            }
+        } else {
+            nearbyStaleMonitor?.invalidate()
+            nearbyStaleMonitor = nil
+        }
+    }
+
+    private func handleNearbyPeers(_ peers: [NearbySignalPeer]) {
+        nearbyPeers = peers
+        if nearbyMirroringMode == .followNearbyMac,
+           selectedNearbyPeerID == nil,
+           let firstPeer = peers.first {
+            selectedNearbyPeerID = firstPeer.id
+            AppPreferences.saveSelectedNearbyPeerID(firstPeer.id)
+            refreshNearbyLastSignalAt()
+            configureNearbySignalService()
+        }
+    }
+
+    private func handleNearbySignal(_ signal: ReceivedNearbySignal) {
+        guard nearbyMirroringMode.receivesNearbySignals,
+              signal.peerID != nearbyNodeID
+        else { return }
+        let now = Date.now
+        receivedNearbySignals[signal.peerID] = signal
+        refreshNearbyLastSignalAt(now: now)
+        refreshRoutedOutput(now: now)
+    }
+
+    private func pruneStaleNearbySignals(now: Date = .now) {
+        let stalePeerIDs = receivedNearbySignals.compactMap { peerID, signal in
+            signal.isFresh(at: now) ? nil : peerID
+        }
+        guard !stalePeerIDs.isEmpty else { return }
+        for peerID in stalePeerIDs {
+            receivedNearbySignals[peerID] = nil
+        }
+        refreshNearbyLastSignalAt(now: now)
+        refreshRoutedOutput(now: now)
+    }
+
+    private func refreshNearbyLastSignalAt(now: Date = .now) {
+        switch nearbyMirroringMode {
+        case .followNearbyMac:
+            guard let selectedNearbyPeerID,
+                  let selectedSignal = receivedNearbySignals[selectedNearbyPeerID],
+                  selectedSignal.isFresh(at: now)
+            else {
+                nearbyLastSignalAt = nil
+                return
+            }
+            nearbyLastSignalAt = selectedSignal.receivedAt
+        case .allMacs:
+            nearbyLastSignalAt = receivedNearbySignals.values
+                .filter { $0.isFresh(at: now) }
+                .map(\.receivedAt)
+                .max()
+        case .off, .shareThisMac:
+            nearbyLastSignalAt = nil
+        }
     }
 
     func previewSelectedState() {
@@ -525,18 +808,12 @@ final class CommandCenterStore {
                 self?.reloadProfileSelection()
             }
         }
-        focusMonitor = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.syncFocusProfile()
-            }
-        }
-        Task { @MainActor [weak self] in
-            await self?.syncFocusProfile()
-        }
+        updateFocusMonitor()
     }
 
     private func reloadProfileSelection() {
         focusAutomationEnabled = ProfileLibrary.focusAutomationEnabled()
+        updateFocusMonitor()
         guard let saved = ProfileLibrary.load(), !saved.profiles.isEmpty else { return }
         profiles = saved.profiles
         let targetID = saved.profiles.contains(where: { $0.id == saved.selectedProfileID })
@@ -546,6 +823,30 @@ final class CommandCenterStore {
         selectedProfileID = targetID
         resetAllocators()
         recompile()
+    }
+
+    private func updateFocusMonitor() {
+        focusAutomationEnabled = ProfileLibrary.focusAutomationEnabled()
+        guard focusAutomationEnabled else {
+            focusMonitor?.invalidate()
+            focusMonitor = nil
+            activeFocusProfileID = nil
+            hasObservedFocusContext = false
+            lastObservedFocusProfileID = nil
+            return
+        }
+
+        if focusMonitor == nil {
+            focusMonitor = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) {
+                [weak self] _ in
+                Task { @MainActor [weak self] in
+                    await self?.syncFocusProfile()
+                }
+            }
+        }
+        Task { @MainActor [weak self] in
+            await self?.syncFocusProfile()
+        }
     }
 
     private func syncFocusProfile() async {
@@ -636,7 +937,11 @@ final class CommandCenterStore {
         } else {
             dotDevice = device
         }
-        if topologyChanged { recompile() }
+        if topologyChanged {
+            recompile()
+        } else {
+            notifySoftwareDisplayChanged()
+        }
     }
 
     private func handleBatteryUpdate(_ state: BatteryState?) {
@@ -673,19 +978,19 @@ final class CommandCenterStore {
     }
 
     private func syncHardwareOutput() {
-        let currentStates = Dictionary(uniqueKeysWithValues: proScene.placementsTopToBottom.map {
+        let currentStates = Dictionary(uniqueKeysWithValues: routedProScene.placementsTopToBottom.map {
             ($0.agent.id, $0.agent.state)
         })
         let timing = hardwareTiming(from: lastOutputStates, to: currentStates)
         proHardware?.update(
-            enabled: liveOutputEnabled,
-            program: proScene.program,
+            enabled: outputPowerIsOn,
+            program: routedProScene.program,
             brightnessScale: universalBrightness,
             timing: timing
         )
         dotHardware?.update(
-            enabled: liveOutputEnabled,
-            program: dotScene.program,
+            enabled: outputPowerIsOn,
+            program: routedDotScene.program,
             brightnessScale: universalBrightness,
             timing: dotHardwareTiming(from: timing)
         )
@@ -694,8 +999,8 @@ final class CommandCenterStore {
 
     private func dotHardwareTiming(from timing: HardwareUpdateTiming) -> HardwareUpdateTiming {
         guard case .animationBoundary = timing,
-              dotScene.placementsTopToBottom.count == 1,
-              let placement = dotScene.placementsTopToBottom.first,
+              routedDotScene.placementsTopToBottom.count == 1,
+              let placement = routedDotScene.placementsTopToBottom.first,
               placement.ledIndices.count == SidePulseDeviceKind.dot.ledCount,
               selectedProfile.style(for: placement.agent.state).motion == .breathe
         else { return timing }
@@ -711,7 +1016,7 @@ final class CommandCenterStore {
         from previous: [String: AgentState],
         to current: [String: AgentState]
     ) -> HardwareUpdateTiming {
-        guard liveOutputEnabled,
+        guard outputPowerIsOn,
               AgentStateTransitionPolicy.defersToAnimationBoundary(from: previous, to: current)
         else { return .immediate }
 

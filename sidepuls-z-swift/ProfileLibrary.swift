@@ -167,6 +167,9 @@ enum AppPreferences {
     private static let agentDisplayModeKey = "sidepulse.agent-display-mode.v1"
     private static let menuBarIconStyleKey = "sidepulse.menu-bar-icon-style.v1"
     private static let universalBrightnessKey = "sidepulse.universal-brightness.v1"
+    private static let nearbyMirroringModeKey = "sidepulse.nearby-mirroring-mode.v1"
+    private static let selectedNearbyPeerKey = "sidepulse.selected-nearby-peer.v1"
+    private static let nearbyNodeIDKey = "sidepulse.nearby-node-id.v1"
 
     static func liveOutputEnabled(from defaults: UserDefaults = .standard) -> Bool {
         guard defaults.object(forKey: liveOutputKey) != nil else {
@@ -223,6 +226,49 @@ enum AppPreferences {
         to defaults: UserDefaults = .standard
     ) {
         defaults.set(max(0, min(1, brightness)), forKey: universalBrightnessKey)
+    }
+
+    static func nearbyMirroringMode(
+        from defaults: UserDefaults = .standard
+    ) -> NearbyMirroringMode {
+        guard let rawValue = defaults.string(forKey: nearbyMirroringModeKey),
+              let mode = NearbyMirroringMode(rawValue: rawValue)
+        else { return .off }
+        return mode
+    }
+
+    static func saveNearbyMirroringMode(
+        _ mode: NearbyMirroringMode,
+        to defaults: UserDefaults = .standard
+    ) {
+        defaults.set(mode.rawValue, forKey: nearbyMirroringModeKey)
+    }
+
+    static func selectedNearbyPeerID(
+        from defaults: UserDefaults = .standard
+    ) -> String? {
+        defaults.string(forKey: selectedNearbyPeerKey)
+    }
+
+    static func saveSelectedNearbyPeerID(
+        _ peerID: String?,
+        to defaults: UserDefaults = .standard
+    ) {
+        if let peerID {
+            defaults.set(peerID, forKey: selectedNearbyPeerKey)
+        } else {
+            defaults.removeObject(forKey: selectedNearbyPeerKey)
+        }
+    }
+
+    static func nearbyNodeID(from defaults: UserDefaults = .standard) -> String {
+        if let stored = defaults.string(forKey: nearbyNodeIDKey)?.lowercased(),
+           UUID(uuidString: stored) != nil {
+            return stored
+        }
+        let nodeID = UUID().uuidString.lowercased()
+        defaults.set(nodeID, forKey: nearbyNodeIDKey)
+        return nodeID
     }
 
     static func batteryIndicatorSettings(

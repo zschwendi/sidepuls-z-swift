@@ -21,7 +21,7 @@ SidePulse Z is a native SwiftUI command center for [SidePulse](https://sidepulse
 - Opens a detected session directly from Agent Hub or the menu-bar popover.
 - Shows battery level on configured lid events and supports recurring low-battery reminders.
 - Provides per-state colors, motion, intensity, speed, brightness, profiles, and Focus automation.
-- Runs locally with no SidePulse account or analytics service.
+- Runs locally by default with no SidePulse account or analytics service.
 
 ## Signal language
 
@@ -65,6 +65,8 @@ Signal mode, hardware brightness, menu-bar layout, profiles, integrations, diagn
 
 SidePulse Pro is the primary tested hardware target. SidePulse Dot and dual-device paths exist in the codebase but are experimental and are not part of the current support promise.
 
+For clarity, this is a macOS app. Direct Mac-mounted hardware still uses the `LEDS.LED` path. This app does not implement Peter Kuhar's APNs path for a SidePulse Dot attached to an iPhone; that iOS delivery path is outside the current support promise.
+
 Current agent support:
 
 | Provider | Status |
@@ -73,6 +75,21 @@ Current agent support:
 | Codex cloud tasks | Discovered through the locally authenticated Codex CLI when available. |
 | Grok Bot | Experimental local persistence discovery. |
 | Generic Grok and Claude hooks | Event ingestion exists; turnkey setup is not yet packaged. |
+
+## Nearby Mac mirroring (experimental)
+
+Nearby Mac mirroring is explicitly opt-in and defaults to **Off**. It uses Bonjour service `_sidepulse-z._tcp` and is intended for Macs on the same local LAN. Modes other than Off require macOS Local Network permission; Bonjour discovery can also be blocked by guest networks, VPNs, or network isolation.
+
+| Mode | Behavior |
+| --- | --- |
+| **Off** | Keep this Mac's local signal only; do not publish or follow nearby signals. |
+| **Share This Mac** | Publish this Mac's signal so nearby Macs can follow it, while this Mac continues showing its local signal. |
+| **Follow Nearby Mac** | Follow one selected discovered Mac and show its compiled Pro/Dot light program. |
+| **All Macs** | Share this Mac and choose the highest-priority fresh signal across this Mac and discovered Macs. |
+
+The signal payload contains protocol metadata, coarse aggregate state, timing, and Pro/Dot compiled LED programs only. It does not contain agent names, messages, projects, paths, or LED slots. Bonjour discovery does expose a Mac display name and per-instance node identifier so peers can be listed and selected. There is no authentication or pairing yet, so use this feature only on a trusted local network.
+
+Remote frames older than 3.5 seconds stop driving **Follow Nearby Mac**. **All Macs** drops stale remote frames and falls back to another fresh signal, including a fresh local signal when available.
 
 ## Build and run
 
@@ -117,7 +134,7 @@ The latest merged snapshot is stored under `${XDG_STATE_HOME:-~/.local/state}/si
 
 ## Privacy
 
-SidePulse Z has no analytics SDK, advertising SDK, or SidePulse account. It reads local agent metadata so it can show task titles and states, and it writes LED programs to a mounted SidePulse device when Live Output is enabled. Codex cloud discovery may invoke your existing Codex CLI, which uses that tool's already-configured account and network behavior.
+SidePulse Z has no analytics SDK, advertising SDK, or SidePulse account. It reads local agent metadata so it can show task titles and states, and it writes LED programs to a mounted SidePulse device when Live Output is enabled. Codex cloud discovery may invoke your existing Codex CLI, which uses that tool's already-configured account and network behavior. Nearby Mac mirroring is separately opt-in and defaults to Off; when enabled, it uses Bonjour on the local network and sends only the protocol metadata, coarse aggregate state, timing, and Pro/Dot compiled LED programs described above.
 
 Before sharing diagnostics, review them for task names, local paths, and agent messages.
 

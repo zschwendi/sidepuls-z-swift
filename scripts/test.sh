@@ -16,6 +16,7 @@ cd "$repo_dir"
 xcrun swiftc \
     sidepuls-z-swift/LEDProgramRenderer.swift \
     sidepuls-z-swift/Models.swift \
+    sidepuls-z-swift/NearbySignalModels.swift \
     sidepuls-z-swift/ProfileLibrary.swift \
     Tests/ProfileLibrarySmoke.swift \
     -o "$test_dir/ProfileLibrarySmoke"
@@ -29,6 +30,14 @@ xcrun swiftc \
     Tests/SceneCompilerSmoke.swift \
     -o "$test_dir/SceneCompilerSmoke"
 "$test_dir/SceneCompilerSmoke"
+
+xcrun swiftc \
+    sidepuls-z-swift/LEDProgramRenderer.swift \
+    sidepuls-z-swift/Models.swift \
+    sidepuls-z-swift/NearbySignalModels.swift \
+    Tests/NearbySignalSmoke.swift \
+    -o "$test_dir/NearbySignalSmoke"
+"$test_dir/NearbySignalSmoke"
 
 xcrun swiftc \
     sidepuls-z-swift/CodexIPCBridge.swift \

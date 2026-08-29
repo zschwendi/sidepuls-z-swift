@@ -100,6 +100,7 @@ final class DisplayLinkedLEDArrayNSView: NSView {
     private var animationDisplayLink: CADisplayLink?
     private var dotLayers: [CAShapeLayer] = []
     private var labelLayers: [CATextLayer] = []
+    private var lastColors: [LEDProgramColor] = []
 
     init(
         program: String,
@@ -128,6 +129,7 @@ final class DisplayLinkedLEDArrayNSView: NSView {
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
         animationDisplayLink?.invalidate()
     }
 
@@ -137,6 +139,7 @@ final class DisplayLinkedLEDArrayNSView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self)
         if window == nil {
             animationDisplayLink?.invalidate()
             animationDisplayLink = nil
@@ -152,6 +155,33 @@ final class DisplayLinkedLEDArrayNSView: NSView {
             )
             displayLink.add(to: .main, forMode: .common)
             animationDisplayLink = displayLink
+        }
+        if let window {
+            for name in [
+                NSWindow.didChangeOcclusionStateNotification,
+                NSWindow.didMiniaturizeNotification,
+                NSWindow.didDeminiaturizeNotification,
+            ] {
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(displayVisibilityDidChange(_:)),
+                    name: name,
+                    object: window
+                )
+            }
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(displayVisibilityDidChange(_:)),
+                name: NSApplication.didHideNotification,
+                object: NSApp
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(displayVisibilityDidChange(_:)),
+                name: NSApplication.didUnhideNotification,
+                object: NSApp
+            )
+            updateFrame(at: .now)
         }
     }
 
@@ -219,13 +249,33 @@ final class DisplayLinkedLEDArrayNSView: NSView {
     }
 
     @objc private func displayLinkDidFire(_ displayLink: CADisplayLink) {
+        guard isDisplayVisible else {
+            displayLink.isPaused = true
+            return
+        }
         updateFrame(at: Date.now)
+    }
+
+    @objc private func displayVisibilityDidChange(_ notification: Notification) {
+        updateFrame(at: .now)
+    }
+
+    private var isDisplayVisible: Bool {
+        guard let window else { return false }
+        return window.isVisible
+            && !window.isMiniaturized
+            && !NSApp.isHidden
+            && window.occlusionState.contains(.visible)
     }
 
     private func updateFrame(at date: Date) {
         let elapsed = clockOrigin.map { max(0, date.timeIntervalSince($0)) }
             ?? date.timeIntervalSinceReferenceDate
         let colors = firmware.frame(at: elapsed).colors
+        animationDisplayLink?.isPaused = !isDisplayVisible
+            || !firmware.needsAnimationFrame(at: elapsed)
+        guard colors != lastColors else { return }
+        lastColors = colors
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -250,6 +300,7 @@ final class DisplayLinkedLEDArrayNSView: NSView {
         labelLayers.forEach { $0.removeFromSuperlayer() }
         dotLayers.removeAll(keepingCapacity: true)
         labelLayers.removeAll(keepingCapacity: true)
+        lastColors.removeAll(keepingCapacity: true)
 
         for index in 0..<ledCount {
             let dot = CAShapeLayer()

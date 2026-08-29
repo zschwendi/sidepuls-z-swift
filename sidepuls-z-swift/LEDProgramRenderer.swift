@@ -142,6 +142,10 @@ struct LEDFirmwareProgram: Equatable, Sendable {
         repeats && cycleDuration > 0
     }
 
+    func needsAnimationFrame(at elapsed: TimeInterval) -> Bool {
+        isRepeatingAnimation || max(0, elapsed) < cycleDuration
+    }
+
     init(program: String, ledCount: Int) {
         let count = max(1, min(8, ledCount))
         self.ledCount = count

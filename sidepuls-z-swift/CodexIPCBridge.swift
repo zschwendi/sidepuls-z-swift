@@ -35,6 +35,8 @@ final class CodexIPCBridge: @unchecked Sendable {
     private var desiredThreadIDs: Set<String> = []
     private var ownerByThreadID: [String: String] = [:]
     private var pendingDiscoveryThreadIDs: Set<String> = []
+    private var ownerDiscoveryRetryAttempts: [String: Int] = [:]
+    private var ownerDiscoveryRetryWorkItems: [String: DispatchWorkItem] = [:]
     private var requests: [String: RequestKind] = [:]
     private var onStatusChange: (@Sendable () -> Void)?
 
@@ -68,6 +70,7 @@ final class CodexIPCBridge: @unchecked Sendable {
             let removed = self.desiredThreadIDs.subtracting(threadIDs)
             for threadID in removed {
                 self.pendingDiscoveryThreadIDs.remove(threadID)
+                self.cancelOwnerDiscoveryRetry(threadID: threadID)
                 if let ownerID = self.ownerByThreadID.removeValue(forKey: threadID) {
                     self.sendFollowing(threadID: threadID, ownerID: ownerID, following: false)
                 }
@@ -209,6 +212,7 @@ final class CodexIPCBridge: @unchecked Sendable {
         case "client-status-changed", "ipc-connection-reset":
             ownerByThreadID.removeAll()
             pendingDiscoveryThreadIDs.removeAll()
+            cancelAllOwnerDiscoveryRetries()
             clearLiveStatuses()
             for threadID in desiredThreadIDs { discoverOwner(threadID: threadID) }
         default:
@@ -221,6 +225,7 @@ final class CodexIPCBridge: @unchecked Sendable {
             if case let .discover(threadID) = request {
                 pendingDiscoveryThreadIDs.remove(threadID)
                 ownerByThreadID[threadID] = nil
+                scheduleOwnerDiscoveryRetry(threadID: threadID)
             }
             return
         }
@@ -232,7 +237,15 @@ final class CodexIPCBridge: @unchecked Sendable {
             for threadID in desiredThreadIDs { discoverOwner(threadID: threadID) }
         case let .discover(threadID):
             pendingDiscoveryThreadIDs.remove(threadID)
-            guard desiredThreadIDs.contains(threadID), let ownerID = envelope.handledByClientId else { return }
+            guard desiredThreadIDs.contains(threadID) else {
+                cancelOwnerDiscoveryRetry(threadID: threadID)
+                return
+            }
+            guard let ownerID = envelope.handledByClientId else {
+                scheduleOwnerDiscoveryRetry(threadID: threadID)
+                return
+            }
+            cancelOwnerDiscoveryRetry(threadID: threadID)
             ownerByThreadID[threadID] = ownerID
             sendFollowing(threadID: threadID, ownerID: ownerID, following: true)
             sendRequest(
@@ -249,15 +262,56 @@ final class CodexIPCBridge: @unchecked Sendable {
     }
 
     private func discoverOwner(threadID: String) {
-        guard desiredThreadIDs.contains(threadID), pendingDiscoveryThreadIDs.insert(threadID).inserted else {
+        guard clientID != "initializing-client",
+              desiredThreadIDs.contains(threadID),
+              ownerByThreadID[threadID] == nil,
+              pendingDiscoveryThreadIDs.insert(threadID).inserted
+        else {
             return
         }
-        sendRequest(
+        let sent = sendRequest(
             method: "thread-owner-discovery",
             version: 1,
             params: ["hostId": "local", "conversationId": threadID],
             kind: .discover(threadID: threadID)
         )
+        if !sent {
+            pendingDiscoveryThreadIDs.remove(threadID)
+            scheduleOwnerDiscoveryRetry(threadID: threadID)
+        }
+    }
+
+    private func scheduleOwnerDiscoveryRetry(threadID: String) {
+        guard started,
+              socket >= 0,
+              clientID != "initializing-client",
+              desiredThreadIDs.contains(threadID),
+              ownerByThreadID[threadID] == nil,
+              !pendingDiscoveryThreadIDs.contains(threadID),
+              ownerDiscoveryRetryWorkItems[threadID] == nil
+        else { return }
+
+        let attempt = min((ownerDiscoveryRetryAttempts[threadID] ?? 0) + 1, 6)
+        ownerDiscoveryRetryAttempts[threadID] = attempt
+        let delay = min(30.0, Double(1 << max(0, attempt - 1)))
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.ownerDiscoveryRetryWorkItems[threadID] = nil
+            self.discoverOwner(threadID: threadID)
+        }
+        ownerDiscoveryRetryWorkItems[threadID] = work
+        queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func cancelOwnerDiscoveryRetry(threadID: String) {
+        ownerDiscoveryRetryWorkItems.removeValue(forKey: threadID)?.cancel()
+        ownerDiscoveryRetryAttempts[threadID] = nil
+    }
+
+    private func cancelAllOwnerDiscoveryRetries() {
+        ownerDiscoveryRetryWorkItems.values.forEach { $0.cancel() }
+        ownerDiscoveryRetryWorkItems.removeAll(keepingCapacity: true)
+        ownerDiscoveryRetryAttempts.removeAll(keepingCapacity: true)
     }
 
     private func sendFollowing(threadID: String, ownerID: String, following: Bool) {
@@ -275,6 +329,7 @@ final class CodexIPCBridge: @unchecked Sendable {
         ])
     }
 
+    @discardableResult
     private func sendRequest(
         method: String,
         version: Int,
@@ -282,7 +337,7 @@ final class CodexIPCBridge: @unchecked Sendable {
         targetClientID: String? = nil,
         timeoutMilliseconds: Int = 10_000,
         kind: RequestKind
-    ) {
+    ) -> Bool {
         let requestID = UUID().uuidString.lowercased()
         var message: [String: Any] = [
             "type": "request",
@@ -295,7 +350,9 @@ final class CodexIPCBridge: @unchecked Sendable {
         ]
         if let targetClientID { message["targetClientId"] = targetClientID }
         requests[requestID] = kind
-        if !sendMessage(message) { requests[requestID] = nil }
+        let sent = sendMessage(message)
+        if !sent { requests[requestID] = nil }
+        return sent
     }
 
     @discardableResult
@@ -423,6 +480,7 @@ final class CodexIPCBridge: @unchecked Sendable {
         requests.removeAll()
         ownerByThreadID.removeAll()
         pendingDiscoveryThreadIDs.removeAll()
+        cancelAllOwnerDiscoveryRetries()
         readBuffer.removeAll(keepingCapacity: true)
         clearLiveStatuses()
         if scheduleReconnect { self.scheduleReconnect() }
