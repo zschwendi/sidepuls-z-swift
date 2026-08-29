@@ -67,6 +67,9 @@ final class CommandCenterStore {
     var agentDisplayMode = AppPreferences.agentDisplayMode()
     var menuBarIconStyle = AppPreferences.menuBarIconStyle()
     var universalBrightness = AppPreferences.universalBrightness()
+    var ejectPreventionEnabled = AppPreferences.ejectPreventionEnabled()
+    var ejectPreventionManagedExternally = false
+    var ejectPreventionMessage = "Checking eject prevention…"
     var nearbyMirroringMode = AppPreferences.nearbyMirroringMode()
     var selectedNearbyPeerID = AppPreferences.selectedNearbyPeerID()
     var nearbyPeers: [NearbySignalPeer] = []
@@ -107,6 +110,7 @@ final class CommandCenterStore {
     @ObservationIgnored private var runtime: NativeAgentRuntime?
     @ObservationIgnored private var proHardware: SidePulseHardwareController?
     @ObservationIgnored private var dotHardware: SidePulseHardwareController?
+    @ObservationIgnored private let ejectGuard = SidePulseEjectGuard()
     @ObservationIgnored private var lidMonitor: LidStateMonitor?
     @ObservationIgnored private var batteryMonitor: BatteryStateMonitor?
     @ObservationIgnored private var lastLowBatteryAlertAt: Date?
@@ -175,6 +179,7 @@ final class CommandCenterStore {
         recompile()
         refreshLaunchAtLoginStatus()
         startNativeRuntime()
+        configureEjectPrevention()
         startNearbySignalService()
         startProfileAutomation()
     }
@@ -285,6 +290,21 @@ final class CommandCenterStore {
         syncHardwareOutput()
     }
 
+    var ejectPreventionIsOn: Bool {
+        ejectPreventionManagedExternally || ejectGuard.isRunning
+    }
+
+    var ejectPreventionCanBeChanged: Bool {
+        !ejectPreventionManagedExternally
+    }
+
+    func setEjectPreventionEnabled(_ enabled: Bool) {
+        guard ejectPreventionCanBeChanged else { return }
+        ejectPreventionEnabled = enabled
+        AppPreferences.saveEjectPreventionEnabled(enabled)
+        configureEjectPrevention()
+    }
+
     var outputPowerIsOn: Bool {
         liveOutputEnabled && universalBrightness > 0.000_1
     }
@@ -372,6 +392,28 @@ final class CommandCenterStore {
 
     func openLoginItemsSettings() {
         SMAppService.openSystemSettingsLoginItems()
+    }
+
+    private func configureEjectPrevention() {
+        ejectPreventionManagedExternally = SidePulseEjectGuard.runningExternalHelperExists()
+        if ejectPreventionManagedExternally {
+            ejectGuard.stop()
+            ejectPreventionMessage = "Protected by the existing SidePulse eject helper."
+            return
+        }
+
+        guard ejectPreventionEnabled else {
+            ejectGuard.stop()
+            ejectPreventionMessage = "Off. Turn this on to protect SidePulse Pro from software ejects."
+            return
+        }
+
+        do {
+            try ejectGuard.start()
+            ejectPreventionMessage = "On while SidePulse is running. Other SD cards are not affected."
+        } catch {
+            ejectPreventionMessage = "Couldn’t start eject prevention: \(error.localizedDescription)"
+        }
     }
 
     func updateSelectedProfile(_ update: (inout LightingProfile) -> Void) {

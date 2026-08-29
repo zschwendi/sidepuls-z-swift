@@ -34,6 +34,14 @@ xcrun swiftc \
 xcrun swiftc \
     sidepuls-z-swift/LEDProgramRenderer.swift \
     sidepuls-z-swift/Models.swift \
+    sidepuls-z-swift/SidePulseEjectGuard.swift \
+    Tests/EjectGuardSmoke.swift \
+    -o "$test_dir/EjectGuardSmoke"
+"$test_dir/EjectGuardSmoke"
+
+xcrun swiftc \
+    sidepuls-z-swift/LEDProgramRenderer.swift \
+    sidepuls-z-swift/Models.swift \
     sidepuls-z-swift/NearbySignalModels.swift \
     Tests/NearbySignalSmoke.swift \
     -o "$test_dir/NearbySignalSmoke"

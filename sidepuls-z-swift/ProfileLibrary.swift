@@ -170,6 +170,7 @@ enum AppPreferences {
     private static let nearbyMirroringModeKey = "sidepulse.nearby-mirroring-mode.v1"
     private static let selectedNearbyPeerKey = "sidepulse.selected-nearby-peer.v1"
     private static let nearbyNodeIDKey = "sidepulse.nearby-node-id.v1"
+    private static let ejectPreventionKey = "sidepulse.eject-prevention-enabled.v1"
 
     static func liveOutputEnabled(from defaults: UserDefaults = .standard) -> Bool {
         guard defaults.object(forKey: liveOutputKey) != nil else {
@@ -182,6 +183,18 @@ enum AppPreferences {
 
     static func saveLiveOutputEnabled(_ enabled: Bool, to defaults: UserDefaults = .standard) {
         defaults.set(enabled, forKey: liveOutputKey)
+    }
+
+    static func ejectPreventionEnabled(from defaults: UserDefaults = .standard) -> Bool {
+        guard defaults.object(forKey: ejectPreventionKey) != nil else { return true }
+        return defaults.bool(forKey: ejectPreventionKey)
+    }
+
+    static func saveEjectPreventionEnabled(
+        _ enabled: Bool,
+        to defaults: UserDefaults = .standard
+    ) {
+        defaults.set(enabled, forKey: ejectPreventionKey)
     }
 
     static func agentDisplayMode(from defaults: UserDefaults = .standard) -> AgentDisplayMode {

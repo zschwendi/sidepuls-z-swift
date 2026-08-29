@@ -1541,6 +1541,8 @@ struct HardwareView: View {
                 HardwareDeviceCard(device: device)
             }
 
+            EjectPreventionRow(store: store)
+
             Label("Live Output is remembered between launches.", systemImage: "memorychip")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -1554,6 +1556,51 @@ struct HardwareView: View {
                 .background(.black.opacity(0.45), in: .rect(cornerRadius: 16))
             Spacer()
         }
+    }
+}
+
+struct EjectPreventionRow: View {
+    @Bindable var store: CommandCenterStore
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "shield.lefthalf.filled")
+                .font(.title2)
+                .foregroundStyle(store.ejectPreventionIsOn ? .green : .secondary)
+                .frame(width: 38, height: 38)
+                .background(
+                    (store.ejectPreventionIsOn ? Color.green : Color.secondary).opacity(0.1),
+                    in: .rect(cornerRadius: 12)
+                )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Keep SidePulse Pro mounted")
+                    .font(.headline)
+                Text(store.ejectPreventionMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Toggle(
+                "Prevent SidePulse Pro ejection",
+                isOn: Binding(
+                    get: { store.ejectPreventionIsOn },
+                    set: { store.setEjectPreventionEnabled($0) }
+                )
+            )
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .disabled(!store.ejectPreventionCanBeChanged)
+            .help(
+                store.ejectPreventionManagedExternally
+                    ? "Managed by the existing SidePulse eject helper"
+                    : "Prevent macOS from ejecting SidePulse Pro after lock or hibernate"
+            )
+        }
+        .padding(16)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 }
 

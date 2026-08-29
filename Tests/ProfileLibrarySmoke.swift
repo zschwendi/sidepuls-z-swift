@@ -146,6 +146,9 @@ enum ProfileLibrarySmoke {
         precondition(AppPreferences.universalBrightness(from: preferencesDefaults) == 0)
         AppPreferences.saveUniversalBrightness(2, to: preferencesDefaults)
         precondition(AppPreferences.universalBrightness(from: preferencesDefaults) == 1)
+        precondition(AppPreferences.ejectPreventionEnabled(from: preferencesDefaults))
+        AppPreferences.saveEjectPreventionEnabled(false, to: preferencesDefaults)
+        precondition(!AppPreferences.ejectPreventionEnabled(from: preferencesDefaults))
         precondition(AppPreferences.nearbyMirroringMode(from: preferencesDefaults) == .off)
         AppPreferences.saveNearbyMirroringMode(.allMacs, to: preferencesDefaults)
         precondition(AppPreferences.nearbyMirroringMode(from: preferencesDefaults) == .allMacs)
@@ -180,7 +183,7 @@ enum ProfileLibrarySmoke {
         precondition(identityMigrationDefaults.string(forKey: "sidepulse.agent-display-mode.v1") == "perAgent")
         precondition(identityMigrationDefaults.object(forKey: "NSWindow Frame command-center") == nil)
 
-        print("Profile library smoke passed: profiles, display mode, menu icon, brightness, nearby routing, and battery preferences persist independently")
+        print("Profile library smoke passed: profiles, display mode, menu icon, brightness, eject prevention, nearby routing, and battery preferences persist independently")
     }
 
     private static func require<T>(_ value: T?) throws -> T {
