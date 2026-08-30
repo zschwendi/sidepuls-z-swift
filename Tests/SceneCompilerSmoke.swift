@@ -386,8 +386,37 @@ enum SceneCompilerSmoke {
         precondition(SidePulseDeviceKind.dot.calibratedBrightnessScale(universalBrightness: 0.5) == 0.2)
         precondition(SidePulseDeviceKind.pro.calibratedBrightnessScale(universalBrightness: -1) == 0)
         precondition(SidePulseDeviceKind.pro.calibratedBrightnessScale(universalBrightness: 2) == 1)
+        precondition(
+            SidePulseDeviceKind.dot.calibratedBrightnessScale(
+                universalBrightness: 0.5,
+                calibration: SidePulseOutputCalibration(brightnessScale: 0.6, blueScale: 0.9)
+            ) == 0.3
+        )
+        precondition(
+            SidePulseOutputCalibration(brightnessScale: 9, blueScale: 0).normalized
+                == SidePulseOutputCalibration(brightnessScale: 1.5, blueScale: 0.5)
+        )
+        assertPerDeviceCalibrationIsolation()
         precondition(SidePulseDeviceKind.pro.outputBlueScale == 1)
         precondition(SidePulseDeviceKind.dot.outputBlueScale == 0.75)
+        precondition(
+            LEDProgramOutputCalibration.scalingBrightness(
+                in: "brightness 128\nsolid #804020",
+                by: 1.5
+            ) == "brightness 192\nsolid #804020"
+        )
+        precondition(
+            LEDProgramOutputCalibration.scalingBrightness(
+                in: "solid #804020",
+                by: 1.5
+            ) == "brightness 255\nsolid #804020"
+        )
+        precondition(
+            LEDProgramOutputCalibration.scalingBlue(
+                in: "solid #204080",
+                by: 1.25
+            ) == "solid #2040A0"
+        )
         precondition(
             LEDProgramOutputCalibration.scalingBrightness(
                 in: "brightness 183\n0:#00B300;1:#000000",
@@ -672,6 +701,39 @@ enum SceneCompilerSmoke {
         """.data(using: .utf8)!
         let decodedPulse = try! JSONDecoder().decode(StateLightStyle.self, from: legacyPulseWaveBuild)
         precondition(decodedPulse.motion == .pulse)
+    }
+
+    private static func assertPerDeviceCalibrationIsolation() {
+        let proCalibration = SidePulseOutputCalibration(brightnessScale: 1.2, blueScale: 1.1)
+        let dotCalibration = SidePulseOutputCalibration(brightnessScale: 0.5, blueScale: 0.6)
+        precondition(proCalibration != dotCalibration)
+
+        let universalBrightness = 0.75
+        let proScale = SidePulseDeviceKind.pro.calibratedBrightnessScale(
+            universalBrightness: universalBrightness,
+            calibration: proCalibration
+        )
+        let dotScale = SidePulseDeviceKind.dot.calibratedBrightnessScale(
+            universalBrightness: universalBrightness,
+            calibration: dotCalibration
+        )
+        precondition(approximately(proScale, 0.9))
+        precondition(approximately(dotScale, 0.375))
+
+        let sourceProgram = "brightness 200\n0:#103050"
+        let proOutput = LEDProgramOutputCalibration.applying(
+            to: sourceProgram,
+            brightnessScale: proScale,
+            blueScale: proCalibration.blueScale
+        )
+        let dotOutput = LEDProgramOutputCalibration.applying(
+            to: sourceProgram,
+            brightnessScale: dotScale,
+            blueScale: dotCalibration.blueScale
+        )
+        precondition(proOutput == "brightness 180\n0:#103058")
+        precondition(dotOutput == "brightness 75\n0:#103030")
+        precondition(proOutput != dotOutput, "Pro and Dot calibration must remain independent")
     }
 
     private static func profile(

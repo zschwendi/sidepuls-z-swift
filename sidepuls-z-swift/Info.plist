@@ -29,6 +29,6 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Zephyr Studios LLC</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>SidePulse discovers nearby Macs so you can mirror agent-status light signals on your local network.</string>
+	<string>SidePulse discovers nearby Macs so each connected SidePulse can use local, nearby, or combined agent-status signals.</string>
 </dict>
 </plist>

@@ -71,10 +71,14 @@ final class CommandCenterStore {
     var ejectPreventionEnabled = AppPreferences.ejectPreventionEnabled()
     var ejectPreventionManagedExternally = false
     var ejectPreventionMessage = "Checking eject prevention…"
-    var nearbyMirroringMode = AppPreferences.nearbyMirroringMode()
-    var selectedNearbyPeerID = AppPreferences.selectedNearbyPeerID()
+    var nearbySharingEnabled = AppPreferences.nearbySharingEnabled()
+    var nearbyDiscoveryEnabled = AppPreferences.nearbyDiscoveryEnabled()
+    var proSignalSource = AppPreferences.signalSource(for: .pro)
+    var dotSignalSource = AppPreferences.signalSource(for: .dot)
+    var proOutputCalibration = AppPreferences.outputCalibration(for: .pro)
+    var dotOutputCalibration = AppPreferences.outputCalibration(for: .dot)
     var nearbyPeers: [NearbySignalPeer] = []
-    var nearbyStatusMessage = "Mirroring is off"
+    var nearbyStatusMessage = "Nearby network is off"
     var nearbyLastSignalAt: Date?
     var launchAtLoginEnabled = false
     var launchAtLoginMessage: String?
@@ -100,8 +104,10 @@ final class CommandCenterStore {
     @ObservationIgnored private var dotScene = CompiledScene(program: "off", slots: [])
     @ObservationIgnored private var routedProScene = CompiledScene(program: "off", slots: [])
     @ObservationIgnored private var routedDotScene = CompiledScene(program: "off", slots: [])
-    @ObservationIgnored private var routedClockOrigin = Date.now
-    @ObservationIgnored private var routedSourceNodeID: String?
+    @ObservationIgnored private var routedProClockOrigin = Date.now
+    @ObservationIgnored private var routedDotClockOrigin = Date.now
+    @ObservationIgnored private var routedProSourceNodeID: String?
+    @ObservationIgnored private var routedDotSourceNodeID: String?
     @ObservationIgnored private let nearbyNodeID = AppPreferences.nearbyNodeID()
     @ObservationIgnored private var localSignalSequence: UInt64 = 0
     @ObservationIgnored private var localProgramStartedAt = Date.now
@@ -117,7 +123,8 @@ final class CommandCenterStore {
     @ObservationIgnored private var batteryMonitor: BatteryStateMonitor?
     @ObservationIgnored private var lastLowBatteryAlertAt: Date?
     @ObservationIgnored private var isShowingPreviewData = true
-    @ObservationIgnored private var lastOutputStates: [String: AgentState] = [:]
+    @ObservationIgnored private var lastProOutputStates: [String: AgentState] = [:]
+    @ObservationIgnored private var lastDotOutputStates: [String: AgentState] = [:]
     @ObservationIgnored private var profileSelectionObserver: NSObjectProtocol?
     @ObservationIgnored private var focusMonitor: Timer?
     @ObservationIgnored private var hasObservedFocusContext = false
@@ -179,6 +186,11 @@ final class CommandCenterStore {
             ),
         ]
         agentSignalHistory = agentSignalHistoryLedger.entries
+        if (proSignalSource.needsNearbySignals || dotSignalSource.needsNearbySignals),
+           !nearbyDiscoveryEnabled {
+            nearbyDiscoveryEnabled = true
+            AppPreferences.saveNearbyDiscoveryEnabled(true)
+        }
         recompile()
         refreshLaunchAtLoginStatus()
         startNativeRuntime()
@@ -200,7 +212,8 @@ final class CommandCenterStore {
     }
 
     var softwareDisplayClockOrigin: Date? {
-        device.connected ? device.lastWrite : routedClockOrigin
+        if device.connected { return device.lastWrite }
+        return device.kind == .dot ? routedDotClockOrigin : routedProClockOrigin
     }
 
     var connectedSoftwareDisplayProgram: String {
@@ -215,14 +228,41 @@ final class CommandCenterStore {
         AgentDisplayPolicy.lightingSessions(from: agents, mode: agentDisplayMode)
     }
 
-    var selectedNearbyPeer: NearbySignalPeer? {
-        guard let selectedNearbyPeerID else { return nil }
-        return nearbyPeers.first(where: { $0.id == selectedNearbyPeerID })
+    var hasLocalVisibleActivity: Bool {
+        lightingAgents.contains { $0.state != .idle }
     }
 
-    var routedSignalSourceName: String {
-        guard let routedSourceNodeID, routedSourceNodeID != nearbyNodeID else { return "This Mac" }
-        return nearbyPeers.first(where: { $0.id == routedSourceNodeID })?.displayName ?? "Nearby Mac"
+    func signalSource(for kind: SidePulseDeviceKind) -> SidePulseSignalSource {
+        kind == .pro ? proSignalSource : dotSignalSource
+    }
+
+    func outputCalibration(for kind: SidePulseDeviceKind) -> SidePulseOutputCalibration {
+        kind == .pro ? proOutputCalibration : dotOutputCalibration
+    }
+
+    func routedSignalSourceName(for kind: SidePulseDeviceKind) -> String {
+        let nodeID = kind == .pro ? routedProSourceNodeID : routedDotSourceNodeID
+        guard let nodeID else { return "No active signal" }
+        guard nodeID != nearbyNodeID else { return "This Mac" }
+        return nearbyPeers.first(where: { $0.id == nodeID })?.displayName ?? "Nearby Mac"
+    }
+
+    func signalSourceStatus(for kind: SidePulseDeviceKind) -> String {
+        let source = signalSource(for: kind)
+        switch source {
+        case .thisMac:
+            return hasLocalVisibleActivity ? "This Mac · active" : "This Mac · waiting for local activity"
+        case .nearbyMac(let peerID):
+            let name = nearbyPeers.first(where: { $0.id == peerID })?.displayName ?? "Nearby Mac"
+            if let signal = receivedNearbySignals[peerID], signal.isFresh(at: .now) {
+                return "Following \(name)"
+            }
+            return hasLocalVisibleActivity
+                ? "\(name) unavailable · using local activity"
+                : "\(name) unavailable · waiting"
+        case .allMacs:
+            return "All Macs · showing \(routedSignalSourceName(for: kind))"
+        }
     }
 
     func selectProfile(_ id: UUID) {
@@ -258,31 +298,78 @@ final class CommandCenterStore {
         handler?()
     }
 
-    func selectNearbyMirroringMode(_ mode: NearbyMirroringMode) {
-        guard nearbyMirroringMode != mode else { return }
-        nearbyMirroringMode = mode
-        AppPreferences.saveNearbyMirroringMode(mode)
-        if mode == .followNearbyMac,
-           selectedNearbyPeerID == nil,
-           let firstPeer = nearbyPeers.first {
-            selectedNearbyPeerID = firstPeer.id
-            AppPreferences.saveSelectedNearbyPeerID(firstPeer.id)
+    func selectSignalSource(
+        _ source: SidePulseSignalSource,
+        for kind: SidePulseDeviceKind
+    ) {
+        guard signalSource(for: kind) != source else { return }
+        if kind == .pro {
+            proSignalSource = source
+        } else {
+            dotSignalSource = source
         }
-        if mode == .off {
-            receivedNearbySignals.removeAll(keepingCapacity: true)
+        AppPreferences.saveSignalSource(source, for: kind)
+        if source.needsNearbySignals, !nearbyDiscoveryEnabled {
+            nearbyDiscoveryEnabled = true
+            AppPreferences.saveNearbyDiscoveryEnabled(true)
         }
         refreshNearbyLastSignalAt()
         configureNearbySignalService()
         refreshRoutedOutput()
     }
 
-    func selectNearbyPeer(_ peerID: String?) {
-        guard selectedNearbyPeerID != peerID else { return }
-        selectedNearbyPeerID = peerID
-        AppPreferences.saveSelectedNearbyPeerID(peerID)
+    func setNearbySharingEnabled(_ enabled: Bool) {
+        guard nearbySharingEnabled != enabled else { return }
+        nearbySharingEnabled = enabled
+        AppPreferences.saveNearbySharingEnabled(enabled)
+        configureNearbySignalService()
+        publishLocalSignal()
+    }
+
+    func setNearbyDiscoveryEnabled(_ enabled: Bool) {
+        guard nearbyDiscoveryEnabled != enabled else { return }
+        nearbyDiscoveryEnabled = enabled
+        AppPreferences.saveNearbyDiscoveryEnabled(enabled)
+        if !enabled {
+            proSignalSource = .thisMac
+            dotSignalSource = .thisMac
+            AppPreferences.saveSignalSource(.thisMac, for: .pro)
+            AppPreferences.saveSignalSource(.thisMac, for: .dot)
+            receivedNearbySignals.removeAll(keepingCapacity: true)
+            nearbyPeers = []
+        }
         refreshNearbyLastSignalAt()
         configureNearbySignalService()
         refreshRoutedOutput()
+    }
+
+    func updateOutputCalibration(
+        for kind: SidePulseDeviceKind,
+        _ update: (inout SidePulseOutputCalibration) -> Void
+    ) {
+        var calibration = outputCalibration(for: kind)
+        update(&calibration)
+        calibration = calibration.normalized
+        guard calibration != outputCalibration(for: kind) else { return }
+        if kind == .pro {
+            proOutputCalibration = calibration
+        } else {
+            dotOutputCalibration = calibration
+        }
+        AppPreferences.saveOutputCalibration(calibration, for: kind)
+        syncHardwareOutput()
+    }
+
+    func resetOutputCalibration(for kind: SidePulseDeviceKind) {
+        let calibration = kind.defaultOutputCalibration
+        guard outputCalibration(for: kind) != calibration else { return }
+        if kind == .pro {
+            proOutputCalibration = calibration
+        } else {
+            dotOutputCalibration = calibration
+        }
+        AppPreferences.saveOutputCalibration(calibration, for: kind)
+        syncHardwareOutput()
     }
 
     func setUniversalBrightness(_ brightness: Double) {
@@ -333,26 +420,8 @@ final class CommandCenterStore {
         setOutputPower(!outputPowerIsOn)
     }
 
-    var selectedNearbySignalIsFresh: Bool {
-        guard let selectedNearbyPeerID,
-              let signal = receivedNearbySignals[selectedNearbyPeerID]
-        else { return false }
-        return signal.isFresh(at: .now)
-    }
-
     var nearbyDisplayStatusMessage: String {
-        guard nearbyMirroringMode == .followNearbyMac,
-              let selectedNearbyPeerID
-        else { return nearbyStatusMessage }
-
-        let name = nearbyPeers.first(where: { $0.id == selectedNearbyPeerID })?.displayName
-            ?? "selected Mac"
-        if selectedNearbySignalIsFresh {
-            return "Following \(name)"
-        }
-        return nearbyStatusMessage.hasPrefix("Connected to ")
-            ? "Connected to \(name) · waiting for a fresh signal…"
-            : nearbyStatusMessage
+        nearbyStatusMessage
     }
 
     var launchAtLoginNeedsApproval: Bool {
@@ -597,7 +666,7 @@ final class CommandCenterStore {
             sentAt: sentAt,
             programStartedAt: localProgramStartedAt,
             aggregateState: aggregateState,
-            hasVisibleActivity: !lightingAgents.isEmpty,
+            hasVisibleActivity: hasLocalVisibleActivity,
             proProgram: proScene.program,
             dotProgram: dotScene.program
         )
@@ -609,35 +678,53 @@ final class CommandCenterStore {
 
     private func refreshRoutedOutput(now: Date = .now) {
         let localFrame = localSignalFrame(sentAt: now)
+        let proRoute = routedOutput(
+            for: .pro,
+            source: proSignalSource,
+            localFrame: localFrame,
+            now: now
+        )
+        let dotRoute = routedOutput(
+            for: .dot,
+            source: dotSignalSource,
+            localFrame: localFrame,
+            now: now
+        )
+        routedProScene = proRoute.scene
+        routedDotScene = dotRoute.scene
+        routedProClockOrigin = proRoute.clockOrigin
+        routedDotClockOrigin = dotRoute.clockOrigin
+        routedProSourceNodeID = proRoute.sourceNodeID
+        routedDotSourceNodeID = dotRoute.sourceNodeID
+        notifySoftwareDisplayChanged()
+        syncHardwareOutput()
+    }
+
+    private func routedOutput(
+        for kind: SidePulseDeviceKind,
+        source: SidePulseSignalSource,
+        localFrame: NearbySignalFrame,
+        now: Date
+    ) -> (scene: CompiledScene, clockOrigin: Date, sourceNodeID: String?) {
         guard let routed = NearbySignalRouter.route(
-            mode: nearbyMirroringMode,
-            selectedPeerID: selectedNearbyPeerID,
+            source: source,
             localFrame: localFrame,
             receivedSignals: receivedNearbySignals,
             now: now
         ) else {
-            routedProScene = CompiledScene(program: "off", slots: [])
-            routedDotScene = CompiledScene(program: "off", slots: [])
-            routedClockOrigin = now
-            routedSourceNodeID = nil
-            notifySoftwareDisplayChanged()
-            syncHardwareOutput()
-            return
+            return (CompiledScene(program: "off", slots: []), now, nil)
         }
 
         let isLocal = routed.frame.sourceNodeID == nearbyNodeID
-        routedProScene = CompiledScene(
-            program: routed.frame.proProgram,
-            slots: isLocal ? proScene.slots : []
+        let localSlots = kind == .pro ? proScene.slots : dotScene.slots
+        return (
+            CompiledScene(
+                program: routed.frame.program(for: kind),
+                slots: isLocal ? localSlots : []
+            ),
+            routed.clockOrigin,
+            routed.frame.sourceNodeID
         )
-        routedDotScene = CompiledScene(
-            program: routed.frame.dotProgram,
-            slots: isLocal ? dotScene.slots : []
-        )
-        routedClockOrigin = routed.clockOrigin
-        routedSourceNodeID = routed.frame.sourceNodeID
-        notifySoftwareDisplayChanged()
-        syncHardwareOutput()
     }
 
     private func notifySoftwareDisplayChanged() {
@@ -672,15 +759,22 @@ final class CommandCenterStore {
     }
 
     private func configureNearbySignalService() {
-        nearbyService?.configure(
-            mode: nearbyMirroringMode,
-            selectedPeerID: selectedNearbyPeerID
-        )
+        nearbyService?.configure(nearbyServiceConfiguration)
         updateNearbyStaleMonitor()
     }
 
+    private var nearbyServiceConfiguration: NearbySignalServiceConfiguration {
+        let sources = [proSignalSource, dotSignalSource]
+        return NearbySignalServiceConfiguration(
+            sharesLocalSignal: nearbySharingEnabled,
+            discoversPeers: nearbyDiscoveryEnabled,
+            followedPeerIDs: Set(sources.compactMap(\.selectedPeerID)),
+            followsAllPeers: sources.contains(.allMacs)
+        )
+    }
+
     private func updateNearbyStaleMonitor() {
-        if nearbyMirroringMode.receivesNearbySignals {
+        if nearbyServiceConfiguration.receivesNearbySignals {
             guard nearbyStaleMonitor == nil else { return }
             nearbyStaleMonitor = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) {
                 [weak self] _ in
@@ -696,20 +790,30 @@ final class CommandCenterStore {
 
     private func handleNearbyPeers(_ peers: [NearbySignalPeer]) {
         nearbyPeers = peers
-        if nearbyMirroringMode == .followNearbyMac,
-           selectedNearbyPeerID == nil,
-           let firstPeer = peers.first {
-            selectedNearbyPeerID = firstPeer.id
-            AppPreferences.saveSelectedNearbyPeerID(firstPeer.id)
-            refreshNearbyLastSignalAt()
-            configureNearbySignalService()
+        let availablePeerIDs = Set(peers.map(\.id))
+        let disappearedPeerIDs = receivedNearbySignals.keys.filter {
+            !availablePeerIDs.contains($0)
         }
+        guard !disappearedPeerIDs.isEmpty else { return }
+        for peerID in disappearedPeerIDs {
+            receivedNearbySignals[peerID] = nil
+        }
+        refreshNearbyLastSignalAt()
+        refreshRoutedOutput()
     }
 
     private func handleNearbySignal(_ signal: ReceivedNearbySignal) {
-        guard nearbyMirroringMode.receivesNearbySignals,
-              signal.peerID != nearbyNodeID
+        let configuration = nearbyServiceConfiguration
+        guard configuration.receivesNearbySignals,
+              signal.peerID != nearbyNodeID,
+              signal.frame.sourceNodeID == signal.peerID
         else { return }
+        if let previous = receivedNearbySignals[signal.peerID] {
+            guard signal.frame.sequence > previous.frame.sequence
+                    || (signal.frame.sequence == previous.frame.sequence
+                        && signal.frame.generatedAt >= previous.frame.generatedAt)
+            else { return }
+        }
         let now = Date.now
         receivedNearbySignals[signal.peerID] = signal
         refreshNearbyLastSignalAt(now: now)
@@ -729,24 +833,19 @@ final class CommandCenterStore {
     }
 
     private func refreshNearbyLastSignalAt(now: Date = .now) {
-        switch nearbyMirroringMode {
-        case .followNearbyMac:
-            guard let selectedNearbyPeerID,
-                  let selectedSignal = receivedNearbySignals[selectedNearbyPeerID],
-                  selectedSignal.isFresh(at: now)
-            else {
-                nearbyLastSignalAt = nil
-                return
-            }
-            nearbyLastSignalAt = selectedSignal.receivedAt
-        case .allMacs:
-            nearbyLastSignalAt = receivedNearbySignals.values
-                .filter { $0.isFresh(at: now) }
-                .map(\.receivedAt)
-                .max()
-        case .off, .shareThisMac:
+        let configuration = nearbyServiceConfiguration
+        guard configuration.receivesNearbySignals else {
             nearbyLastSignalAt = nil
+            return
         }
+        nearbyLastSignalAt = receivedNearbySignals.values
+            .filter { signal in
+                signal.isFresh(at: now)
+                    && (configuration.followsAllPeers
+                        || configuration.followedPeerIDs.contains(signal.peerID))
+            }
+            .map(\.receivedAt)
+            .max()
     }
 
     func previewSelectedState() {
@@ -779,11 +878,13 @@ final class CommandCenterStore {
         )
         proHardware?.preview(
             program: proPreview.program,
-            brightnessScale: universalBrightness
+            brightnessScale: universalBrightness,
+            outputCalibration: proOutputCalibration
         )
         dotHardware?.preview(
             program: dotPreview.program,
-            brightnessScale: universalBrightness
+            brightnessScale: universalBrightness,
+            outputCalibration: dotOutputCalibration
         )
     }
 
@@ -816,11 +917,13 @@ final class CommandCenterStore {
         proHardware?.preview(
             program: proTransition.program,
             brightnessScale: universalBrightness,
+            outputCalibration: proOutputCalibration,
             duration: proTransition.duration
         )
         dotHardware?.preview(
             program: dotTransition.program,
             brightnessScale: universalBrightness,
+            outputCalibration: dotOutputCalibration,
             duration: dotTransition.duration
         )
     }
@@ -1035,23 +1138,30 @@ final class CommandCenterStore {
     }
 
     private func syncHardwareOutput() {
-        let currentStates = Dictionary(uniqueKeysWithValues: routedProScene.placementsTopToBottom.map {
+        let currentProStates = Dictionary(uniqueKeysWithValues: routedProScene.placementsTopToBottom.map {
             ($0.agent.id, $0.agent.state)
         })
-        let timing = hardwareTiming(from: lastOutputStates, to: currentStates)
+        let currentDotStates = Dictionary(uniqueKeysWithValues: routedDotScene.placementsTopToBottom.map {
+            ($0.agent.id, $0.agent.state)
+        })
+        let proTiming = hardwareTiming(from: lastProOutputStates, to: currentProStates)
+        let dotTiming = hardwareTiming(from: lastDotOutputStates, to: currentDotStates)
         proHardware?.update(
             enabled: outputPowerIsOn,
             program: routedProScene.program,
             brightnessScale: universalBrightness,
-            timing: timing
+            outputCalibration: proOutputCalibration,
+            timing: proTiming
         )
         dotHardware?.update(
             enabled: outputPowerIsOn,
             program: routedDotScene.program,
             brightnessScale: universalBrightness,
-            timing: dotHardwareTiming(from: timing)
+            outputCalibration: dotOutputCalibration,
+            timing: dotHardwareTiming(from: dotTiming)
         )
-        lastOutputStates = currentStates
+        lastProOutputStates = currentProStates
+        lastDotOutputStates = currentDotStates
     }
 
     private func dotHardwareTiming(from timing: HardwareUpdateTiming) -> HardwareUpdateTiming {

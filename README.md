@@ -16,9 +16,9 @@ SidePulse Z is a native macOS app for seeing what your AI coding agents are doin
 - Keeps the physical lights, live array, and animated menu-bar icon in sync.
 - Opens an agent directly from the menu bar or Agent Hub.
 - Includes custom colors, animations, brightness, battery indicators, profiles, and Focus automation.
-- Drives SidePulse Pro directly; SidePulse Dot support is experimental.
+- Drives SidePulse Pro and SidePulse Dot as standalone outputs; neither device requires the other.
 - Keeps SidePulse Pro mounted through software eject attempts after lock or hibernate.
-- Mirrors signals between nearby Macs over Bonjour when enabled.
+- Lets each SidePulse use this Mac, one nearby Mac, or all discovered Macs over Bonjour.
 - Filters internal child-agent noise while keeping top-level sessions accessible.
 
 ## Build and run
@@ -31,7 +31,7 @@ cd sidepuls-z-swift
 open sidepuls-z-swift.xcodeproj
 ```
 
-Select the `sidepuls-z-swift` scheme, choose your Apple development team if Xcode asks, and press Run. SidePulse Pro is the primary tested hardware target, but hardware is optional.
+Select the `sidepuls-z-swift` scheme, choose your Apple development team if Xcode asks, and press Run. SidePulse Pro and SidePulse Dot work independently, and hardware is optional.
 
 Run the smoke tests with:
 

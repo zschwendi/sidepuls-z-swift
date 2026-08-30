@@ -150,11 +150,62 @@ enum ProfileLibrarySmoke {
         AppPreferences.saveEjectPreventionEnabled(false, to: preferencesDefaults)
         precondition(!AppPreferences.ejectPreventionEnabled(from: preferencesDefaults))
         precondition(AppPreferences.nearbyMirroringMode(from: preferencesDefaults) == .off)
+        precondition(!AppPreferences.nearbySharingEnabled(from: preferencesDefaults))
+        precondition(!AppPreferences.nearbyDiscoveryEnabled(from: preferencesDefaults))
+        precondition(AppPreferences.signalSource(for: .pro, from: preferencesDefaults) == .thisMac)
+        precondition(AppPreferences.signalSource(for: .dot, from: preferencesDefaults) == .thisMac)
+        precondition(
+            AppPreferences.outputCalibration(for: .pro, from: preferencesDefaults)
+                == SidePulseDeviceKind.pro.defaultOutputCalibration
+        )
+        precondition(
+            AppPreferences.outputCalibration(for: .dot, from: preferencesDefaults)
+                == SidePulseDeviceKind.dot.defaultOutputCalibration
+        )
         AppPreferences.saveNearbyMirroringMode(.allMacs, to: preferencesDefaults)
         precondition(AppPreferences.nearbyMirroringMode(from: preferencesDefaults) == .allMacs)
+        precondition(AppPreferences.nearbySharingEnabled(from: preferencesDefaults))
+        precondition(AppPreferences.nearbyDiscoveryEnabled(from: preferencesDefaults))
+        precondition(AppPreferences.signalSource(for: .pro, from: preferencesDefaults) == .allMacs)
+        precondition(AppPreferences.signalSource(for: .dot, from: preferencesDefaults) == .allMacs)
         let nearbyPeerID = UUID().uuidString.lowercased()
+        AppPreferences.saveNearbyMirroringMode(.followNearbyMac, to: preferencesDefaults)
         AppPreferences.saveSelectedNearbyPeerID(nearbyPeerID, to: preferencesDefaults)
         precondition(AppPreferences.selectedNearbyPeerID(from: preferencesDefaults) == nearbyPeerID)
+        precondition(
+            AppPreferences.signalSource(for: .pro, from: preferencesDefaults)
+                == .nearbyMac(nearbyPeerID)
+        )
+        precondition(
+            AppPreferences.signalSource(for: .dot, from: preferencesDefaults)
+                == .nearbyMac(nearbyPeerID)
+        )
+        AppPreferences.saveSignalSource(.thisMac, for: .pro, to: preferencesDefaults)
+        AppPreferences.saveSignalSource(.allMacs, for: .dot, to: preferencesDefaults)
+        precondition(AppPreferences.signalSource(for: .pro, from: preferencesDefaults) == .thisMac)
+        precondition(AppPreferences.signalSource(for: .dot, from: preferencesDefaults) == .allMacs)
+        AppPreferences.saveNearbySharingEnabled(false, to: preferencesDefaults)
+        AppPreferences.saveNearbyDiscoveryEnabled(true, to: preferencesDefaults)
+        precondition(!AppPreferences.nearbySharingEnabled(from: preferencesDefaults))
+        precondition(AppPreferences.nearbyDiscoveryEnabled(from: preferencesDefaults))
+        AppPreferences.saveOutputCalibration(
+            SidePulseOutputCalibration(brightnessScale: 0.57, blueScale: 0.83),
+            for: .dot,
+            to: preferencesDefaults
+        )
+        precondition(
+            AppPreferences.outputCalibration(for: .dot, from: preferencesDefaults)
+                == SidePulseOutputCalibration(brightnessScale: 0.57, blueScale: 0.83)
+        )
+        AppPreferences.saveOutputCalibration(
+            SidePulseOutputCalibration(brightnessScale: 99, blueScale: -4),
+            for: .pro,
+            to: preferencesDefaults
+        )
+        precondition(
+            AppPreferences.outputCalibration(for: .pro, from: preferencesDefaults)
+                == SidePulseOutputCalibration(brightnessScale: 1.5, blueScale: 0.5)
+        )
         let nodeID = AppPreferences.nearbyNodeID(from: preferencesDefaults)
         precondition(UUID(uuidString: nodeID) != nil)
         precondition(AppPreferences.nearbyNodeID(from: preferencesDefaults) == nodeID)

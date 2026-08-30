@@ -169,6 +169,10 @@ enum AppPreferences {
     private static let universalBrightnessKey = "sidepulse.universal-brightness.v1"
     private static let nearbyMirroringModeKey = "sidepulse.nearby-mirroring-mode.v1"
     private static let selectedNearbyPeerKey = "sidepulse.selected-nearby-peer.v1"
+    private static let nearbySharingEnabledKey = "sidepulse.nearby-sharing-enabled.v2"
+    private static let nearbyDiscoveryEnabledKey = "sidepulse.nearby-discovery-enabled.v2"
+    private static let deviceSignalSourcesKey = "sidepulse.device-signal-sources.v2"
+    private static let deviceOutputCalibrationsKey = "sidepulse.device-output-calibrations.v2"
     private static let nearbyNodeIDKey = "sidepulse.nearby-node-id.v1"
     private static let ejectPreventionKey = "sidepulse.eject-prevention-enabled.v1"
 
@@ -272,6 +276,110 @@ enum AppPreferences {
         } else {
             defaults.removeObject(forKey: selectedNearbyPeerKey)
         }
+    }
+
+    static func nearbySharingEnabled(
+        from defaults: UserDefaults = .standard
+    ) -> Bool {
+        if defaults.object(forKey: nearbySharingEnabledKey) != nil {
+            return defaults.bool(forKey: nearbySharingEnabledKey)
+        }
+        return nearbyMirroringMode(from: defaults).sharesLocalSignal
+    }
+
+    static func saveNearbySharingEnabled(
+        _ enabled: Bool,
+        to defaults: UserDefaults = .standard
+    ) {
+        defaults.set(enabled, forKey: nearbySharingEnabledKey)
+    }
+
+    static func nearbyDiscoveryEnabled(
+        from defaults: UserDefaults = .standard
+    ) -> Bool {
+        if defaults.object(forKey: nearbyDiscoveryEnabledKey) != nil {
+            return defaults.bool(forKey: nearbyDiscoveryEnabledKey)
+        }
+        return nearbyMirroringMode(from: defaults).receivesNearbySignals
+    }
+
+    static func saveNearbyDiscoveryEnabled(
+        _ enabled: Bool,
+        to defaults: UserDefaults = .standard
+    ) {
+        defaults.set(enabled, forKey: nearbyDiscoveryEnabledKey)
+    }
+
+    static func signalSource(
+        for kind: SidePulseDeviceKind,
+        from defaults: UserDefaults = .standard
+    ) -> SidePulseSignalSource {
+        if let data = defaults.data(forKey: deviceSignalSourcesKey),
+           let stored = try? JSONDecoder().decode(
+               [String: SidePulseSignalSource].self,
+               from: data
+           ),
+           let source = stored[kind.rawValue] {
+            return source
+        }
+
+        switch nearbyMirroringMode(from: defaults) {
+        case .followNearbyMac:
+            return selectedNearbyPeerID(from: defaults).map(SidePulseSignalSource.nearbyMac)
+                ?? .thisMac
+        case .allMacs:
+            return .allMacs
+        case .off, .shareThisMac:
+            return .thisMac
+        }
+    }
+
+    static func saveSignalSource(
+        _ source: SidePulseSignalSource,
+        for kind: SidePulseDeviceKind,
+        to defaults: UserDefaults = .standard
+    ) {
+        var stored = [String: SidePulseSignalSource]()
+        if let data = defaults.data(forKey: deviceSignalSourcesKey),
+           let decoded = try? JSONDecoder().decode(
+               [String: SidePulseSignalSource].self,
+               from: data
+           ) {
+            stored = decoded
+        }
+        stored[kind.rawValue] = source
+        defaults.set(try? JSONEncoder().encode(stored), forKey: deviceSignalSourcesKey)
+    }
+
+    static func outputCalibration(
+        for kind: SidePulseDeviceKind,
+        from defaults: UserDefaults = .standard
+    ) -> SidePulseOutputCalibration {
+        guard let data = defaults.data(forKey: deviceOutputCalibrationsKey),
+              let stored = try? JSONDecoder().decode(
+                  [String: SidePulseOutputCalibration].self,
+                  from: data
+              ),
+              let calibration = stored[kind.rawValue]
+        else { return kind.defaultOutputCalibration }
+        return calibration.normalized
+    }
+
+    static func saveOutputCalibration(
+        _ calibration: SidePulseOutputCalibration,
+        for kind: SidePulseDeviceKind,
+        to defaults: UserDefaults = .standard
+    ) {
+        var stored = [String: SidePulseOutputCalibration]()
+        if let data = defaults.data(forKey: deviceOutputCalibrationsKey),
+           let decoded = try? JSONDecoder().decode(
+               [String: SidePulseOutputCalibration].self,
+               from: data
+           ) {
+            stored = decoded
+        }
+        stored[kind.rawValue] = calibration.normalized
+        defaults.set(try? JSONEncoder().encode(stored), forKey: deviceOutputCalibrationsKey)
     }
 
     static func nearbyNodeID(from defaults: UserDefaults = .standard) -> String {

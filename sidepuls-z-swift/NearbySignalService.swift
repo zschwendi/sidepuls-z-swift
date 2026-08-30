@@ -28,8 +28,7 @@ final class NearbySidePulseService: @unchecked Sendable {
     private let onSignal: SignalHandler
     private let onStatus: StatusHandler
 
-    private var mode: NearbyMirroringMode = .off
-    private var selectedPeerID: String?
+    private var configuration = NearbySignalServiceConfiguration.localOnly
     private var latestLocalFrame: NearbySignalFrame?
 
     private var listener: NWListener?
@@ -71,11 +70,10 @@ final class NearbySidePulseService: @unchecked Sendable {
         outboundConnections.values.forEach { $0.cancel() }
     }
 
-    func configure(mode: NearbyMirroringMode, selectedPeerID: String?) {
+    func configure(_ configuration: NearbySignalServiceConfiguration) {
         queue.async { [weak self] in
             guard let self else { return }
-            self.mode = mode
-            self.selectedPeerID = selectedPeerID
+            self.configuration = configuration
             self.reconcileListenerLocked()
             self.reconcileBrowserLocked()
             self.reconcileOutboundConnectionsLocked()
@@ -90,18 +88,18 @@ final class NearbySidePulseService: @unchecked Sendable {
                   (try? frame.validated()) != nil
             else { return }
             self.latestLocalFrame = frame
-            guard self.mode.sharesLocalSignal else { return }
+            guard self.configuration.sharesLocalSignal else { return }
             self.sendLatestFrameToInboundConnectionsLocked()
         }
     }
 
     func stop() {
         queue.sync {
-            mode = .off
+            configuration = .localOnly
             stopListenerLocked()
             stopBrowserLocked()
             onPeers([])
-            reportStatusLocked("Mirroring is off")
+            reportStatusLocked("Nearby network is off")
         }
     }
 
@@ -129,7 +127,7 @@ final class NearbySidePulseService: @unchecked Sendable {
     }
 
     private func reconcileListenerLocked() {
-        if mode.sharesLocalSignal {
+        if configuration.sharesLocalSignal {
             startListenerLocked()
         } else {
             stopListenerLocked()
@@ -137,7 +135,7 @@ final class NearbySidePulseService: @unchecked Sendable {
     }
 
     private func startListenerLocked() {
-        guard mode.sharesLocalSignal, listener == nil else { return }
+        guard configuration.sharesLocalSignal, listener == nil else { return }
         do {
             let listener = try NWListener(using: .tcp)
             let generation = UUID()
@@ -170,7 +168,7 @@ final class NearbySidePulseService: @unchecked Sendable {
         case .failed(let error):
             reportStatusLocked("Couldn’t share this Mac: \(error.localizedDescription)")
             stopListenerLocked()
-            guard mode.sharesLocalSignal else { return }
+            guard configuration.sharesLocalSignal else { return }
             queue.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.startListenerLocked()
             }
@@ -184,7 +182,7 @@ final class NearbySidePulseService: @unchecked Sendable {
     }
 
     private func acceptInboundConnectionLocked(_ connection: NWConnection) {
-        guard mode.sharesLocalSignal,
+        guard configuration.sharesLocalSignal,
               inboundConnections.count < Self.maximumInboundConnections
         else {
             connection.cancel()
@@ -236,14 +234,14 @@ final class NearbySidePulseService: @unchecked Sendable {
     }
 
     private func sendLatestFrameToInboundConnectionsLocked() {
-        guard mode.sharesLocalSignal else { return }
+        guard configuration.sharesLocalSignal else { return }
         for id in readyInboundConnections where !pendingInboundSends.contains(id) {
             sendLatestFrameLocked(to: id)
         }
     }
 
     private func sendLatestFrameLocked(to id: UUID) {
-        guard mode.sharesLocalSignal,
+        guard configuration.sharesLocalSignal,
               readyInboundConnections.contains(id),
               !pendingInboundSends.contains(id),
               let connection = inboundConnections[id],
@@ -279,7 +277,7 @@ final class NearbySidePulseService: @unchecked Sendable {
     }
 
     private func reconcileBrowserLocked() {
-        if mode.receivesNearbySignals {
+        if configuration.discoversPeers {
             startBrowserLocked()
         } else {
             stopBrowserLocked()
@@ -287,7 +285,7 @@ final class NearbySidePulseService: @unchecked Sendable {
     }
 
     private func startBrowserLocked() {
-        guard mode.receivesNearbySignals, browser == nil else { return }
+        guard configuration.discoversPeers, browser == nil else { return }
         let parameters = NWParameters.tcp
         parameters.includePeerToPeer = true
         let browser = NWBrowser(
@@ -314,7 +312,7 @@ final class NearbySidePulseService: @unchecked Sendable {
         case .failed(let error):
             reportStatusLocked("Nearby discovery failed: \(error.localizedDescription)")
             stopBrowserLocked()
-            guard mode.receivesNearbySignals else { return }
+            guard configuration.discoversPeers else { return }
             queue.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.startBrowserLocked()
             }
@@ -359,19 +357,7 @@ final class NearbySidePulseService: @unchecked Sendable {
     }
 
     private func reconcileOutboundConnectionsLocked() {
-        let desiredPeerIDs: Set<String>
-        switch mode {
-        case .followNearbyMac:
-            if let selectedPeerID, discoveredPeers[selectedPeerID] != nil {
-                desiredPeerIDs = [selectedPeerID]
-            } else {
-                desiredPeerIDs = []
-            }
-        case .allMacs:
-            desiredPeerIDs = Set(discoveredPeers.keys)
-        case .off, .shareThisMac:
-            desiredPeerIDs = []
-        }
+        let desiredPeerIDs = desiredPeerIDsLocked()
 
         for peerID in Array(outboundConnections.keys) where !desiredPeerIDs.contains(peerID) {
             cancelOutboundConnectionLocked(peerID: peerID)
@@ -379,6 +365,14 @@ final class NearbySidePulseService: @unchecked Sendable {
         for peerID in desiredPeerIDs where outboundConnections[peerID] == nil {
             connectToPeerLocked(peerID: peerID)
         }
+    }
+
+    private func desiredPeerIDsLocked() -> Set<String> {
+        guard configuration.discoversPeers else { return [] }
+        if configuration.followsAllPeers {
+            return Set(discoveredPeers.keys)
+        }
+        return configuration.followedPeerIDs.intersection(discoveredPeers.keys)
     }
 
     private func connectToPeerLocked(peerID: String) {
@@ -415,7 +409,7 @@ final class NearbySidePulseService: @unchecked Sendable {
         case .failed, .cancelled:
             cancelOutboundConnectionLocked(peerID: peerID)
             publishStatusLocked()
-            guard mode.receivesNearbySignals, discoveredPeers[peerID] != nil else { return }
+            guard desiredPeerIDsLocked().contains(peerID) else { return }
             queue.asyncAfter(deadline: .now() + 1) { [weak self] in
                 self?.reconcileOutboundConnectionsLocked()
             }
@@ -455,9 +449,7 @@ final class NearbySidePulseService: @unchecked Sendable {
             if isComplete || error != nil {
                 self.cancelOutboundConnectionLocked(peerID: peerID)
                 self.publishStatusLocked()
-                guard self.mode.receivesNearbySignals,
-                      self.discoveredPeers[peerID] != nil
-                else { return }
+                guard self.desiredPeerIDsLocked().contains(peerID) else { return }
                 self.queue.asyncAfter(deadline: .now() + 1) { [weak self] in
                     self?.reconcileOutboundConnectionsLocked()
                 }
@@ -484,29 +476,38 @@ final class NearbySidePulseService: @unchecked Sendable {
     }
 
     private func publishStatusLocked() {
-        switch mode {
-        case .off:
-            reportStatusLocked("Mirroring is off")
-        case .shareThisMac:
-            let count = readyInboundConnections.count
-            reportStatusLocked(count == 0
-                ? "Available to nearby Macs"
-                : "Sharing with \(count) nearby Mac\(count == 1 ? "" : "s")")
-        case .followNearbyMac:
-            guard let selectedPeerID else {
-                reportStatusLocked(discoveredPeers.isEmpty ? "Looking for nearby Macs…" : "Choose a nearby Mac")
-                return
-            }
-            let name = discoveredPeers[selectedPeerID]?.peer.displayName ?? "selected Mac"
-            reportStatusLocked(readyOutboundPeers.contains(selectedPeerID)
-                ? "Connected to \(name)"
-                : "Waiting for \(name)…")
-        case .allMacs:
-            let count = readyOutboundPeers.count
-            reportStatusLocked(count == 0
-                ? "Sharing this Mac · looking for others…"
-                : "Sharing and watching \(count) nearby Mac\(count == 1 ? "" : "s")")
+        guard configuration.sharesLocalSignal || configuration.discoversPeers else {
+            reportStatusLocked("Nearby network is off")
+            return
         }
+
+        let outboundCount = readyOutboundPeers.count
+        let inboundCount = readyInboundConnections.count
+        if configuration.receivesNearbySignals {
+            let watching = outboundCount == 0
+                ? "looking for selected sources"
+                : "watching \(outboundCount) Mac\(outboundCount == 1 ? "" : "s")"
+            if configuration.sharesLocalSignal {
+                reportStatusLocked("Available to nearby Macs · \(watching)")
+            } else {
+                reportStatusLocked(
+                    String(watching.prefix(1)).uppercased() + String(watching.dropFirst())
+                )
+            }
+            return
+        }
+
+        if configuration.discoversPeers {
+            let count = discoveredPeers.count
+            reportStatusLocked(count == 0
+                ? "Looking for nearby Macs…"
+                : "\(count) nearby Mac\(count == 1 ? "" : "s") available")
+            return
+        }
+
+        reportStatusLocked(inboundCount == 0
+            ? "Available to nearby Macs"
+            : "Sharing with \(inboundCount) nearby Mac\(inboundCount == 1 ? "" : "s")")
     }
 
     private func reportStatusLocked(_ message: String) {

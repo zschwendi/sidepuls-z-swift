@@ -33,6 +33,8 @@ enum NearbySignalSmoke {
         let decoded = decoder.append(wire[midpoint...])
         precondition(decoded == [remote])
 
+        try assertBuild33WireFixtureDecoding()
+
         var oversized = remote
         oversized.proProgram = String(repeating: "x", count: NearbySignalFrame.maximumProgramBytes + 1)
         do {
@@ -133,6 +135,25 @@ enum NearbySignalSmoke {
         )
         let receipts = [remoteID: receipt]
 
+        var remoteWithDistinctPrograms = remote
+        remoteWithDistinctPrograms.proProgram = "brightness 101\n0:#FE0001\nrepeat"
+        remoteWithDistinctPrograms.dotProgram = "brightness 37\n0:#0002FD"
+        try assertIndependentPeerProgramRouting(
+            localFrame: local,
+            remoteFrame: remoteWithDistinctPrograms,
+            remoteID: remoteID,
+            now: now
+        )
+
+        let localSource = try require(NearbySignalRouter.route(
+            source: .thisMac,
+            localFrame: local,
+            receivedSignals: receipts,
+            now: now
+        ))
+        precondition(localSource.frame.sourceNodeID == localID)
+        precondition(!localSource.isRemote)
+
         let localRoute = try require(NearbySignalRouter.route(
             mode: .off,
             selectedPeerID: nil,
@@ -189,33 +210,91 @@ enum NearbySignalSmoke {
             frame: remote,
             receivedAt: now.addingTimeInterval(-(NearbySignalRouter.staleAfter + 0.1))
         )
-        precondition(NearbySignalRouter.route(
-            mode: .followNearbyMac,
-            selectedPeerID: remoteID,
+        let staleFallback = try require(NearbySignalRouter.route(
+            source: .nearbyMac(remoteID),
             localFrame: local,
             receivedSignals: [remoteID: staleReceipt],
             now: now
-        ) == nil)
+        ))
+        precondition(staleFallback.frame.sourceNodeID == localID)
+        precondition(!staleFallback.isRemote)
+
+        let inactiveLocal = frame(
+            nodeID: localID,
+            state: .idle,
+            program: "off",
+            at: now,
+            hasVisibleActivity: false
+        )
+        precondition(NearbySignalRouter.route(
+            source: .nearbyMac(remoteID),
+            localFrame: inactiveLocal,
+            receivedSignals: [:],
+            now: now
+        ) == nil, "A missing remote source stays off without local activity")
+
+        var idleRemote = remote
+        idleRemote.aggregateState = .idle
+        idleRemote.hasVisibleActivity = false
+        idleRemote.proProgram = "off"
+        idleRemote.dotProgram = "off"
+        let idleRemoteReceipt = ReceivedNearbySignal(
+            peerID: remoteID,
+            frame: idleRemote,
+            receivedAt: now
+        )
+        let followedIdleRemote = try require(NearbySignalRouter.route(
+            source: .nearbyMac(remoteID),
+            localFrame: local,
+            receivedSignals: [remoteID: idleRemoteReceipt],
+            now: now
+        ))
+        precondition(followedIdleRemote.frame.sourceNodeID == remoteID)
+        precondition(followedIdleRemote.isRemote, "A fresh idle source must not trigger fallback")
+
+        precondition(NearbySignalRouter.route(
+            source: .allMacs,
+            localFrame: inactiveLocal,
+            receivedSignals: [remoteID: idleRemoteReceipt],
+            now: now
+        ) == nil, "All Macs is off when every source is idle")
+
+        let remoteOnly = try require(NearbySignalRouter.route(
+            source: .allMacs,
+            localFrame: inactiveLocal,
+            receivedSignals: receipts,
+            now: now
+        ))
+        precondition(remoteOnly.frame.sourceNodeID == remoteID)
+
+        let unionConfiguration = NearbySignalServiceConfiguration(
+            sharesLocalSignal: true,
+            discoversPeers: true,
+            followedPeerIDs: [remoteID, UUID().uuidString.lowercased()],
+            followsAllPeers: false
+        )
+        precondition(unionConfiguration.receivesNearbySignals)
+        precondition(unionConfiguration.followedPeerIDs.count == 2)
 
         var selfFrame = remote
         selfFrame.sourceNodeID = localID
         let selfReceipt = ReceivedNearbySignal(peerID: localID, frame: selfFrame, receivedAt: now)
         precondition(NearbySignalRouter.route(
-            mode: .followNearbyMac,
-            selectedPeerID: localID,
-            localFrame: local,
+            source: .nearbyMac(localID),
+            localFrame: inactiveLocal,
             receivedSignals: [localID: selfReceipt],
             now: now
         ) == nil)
 
-        print("Nearby signal smoke passed: strict programs, private frames, routing direction, priority, loop rejection, and staleness")
+        print("Nearby signal smoke passed: strict programs, peer-device sources, conditional local fallback, priority, loop rejection, and staleness")
     }
 
     private static func frame(
         nodeID: String,
         state: AgentState,
         program: String,
-        at date: Date
+        at date: Date,
+        hasVisibleActivity: Bool = true
     ) -> NearbySignalFrame {
         NearbySignalFrame(
             sourceNodeID: nodeID,
@@ -224,10 +303,69 @@ enum NearbySignalSmoke {
             sentAt: date.addingTimeInterval(2),
             programStartedAt: date,
             aggregateState: state,
-            hasVisibleActivity: true,
+            hasVisibleActivity: hasVisibleActivity,
             proProgram: program,
             dotProgram: "brightness 255\n0:#FF00FF"
         )
+    }
+
+    private static func assertIndependentPeerProgramRouting(
+        localFrame: NearbySignalFrame,
+        remoteFrame: NearbySignalFrame,
+        remoteID: String,
+        now: Date
+    ) throws {
+        precondition(remoteFrame.proProgram != remoteFrame.dotProgram)
+        let remoteReceipt = ReceivedNearbySignal(
+            peerID: remoteID,
+            frame: remoteFrame,
+            receivedAt: now
+        )
+        let receivedSignals = [remoteID: remoteReceipt]
+        let decisions: [(
+            source: SidePulseSignalSource,
+            kind: SidePulseDeviceKind,
+            expectedSourceNodeID: String,
+            expectedProgram: String,
+            expectedRemote: Bool
+        )] = [
+            (.thisMac, .dot, localFrame.sourceNodeID, localFrame.dotProgram, false),
+            (.nearbyMac(remoteID), .pro, remoteID, remoteFrame.proProgram, true),
+            (.nearbyMac(remoteID), .dot, remoteID, remoteFrame.dotProgram, true),
+            (.allMacs, .pro, remoteID, remoteFrame.proProgram, true),
+            (.allMacs, .dot, remoteID, remoteFrame.dotProgram, true),
+        ]
+
+        for decision in decisions {
+            let routed = try require(NearbySignalRouter.route(
+                source: decision.source,
+                localFrame: localFrame,
+                receivedSignals: receivedSignals,
+                now: now
+            ))
+            precondition(routed.frame.sourceNodeID == decision.expectedSourceNodeID)
+            precondition(routed.frame.program(for: decision.kind) == decision.expectedProgram)
+            precondition(routed.isRemote == decision.expectedRemote)
+        }
+    }
+
+    private static func assertBuild33WireFixtureDecoding() throws {
+        // Build 33 used this synthesized NearbySignalFrame Codable schema and
+        // JSONEncoder's default Date representation (seconds since reference date).
+        let fixture = #"{"version":1,"sourceNodeID":"11111111-1111-1111-1111-111111111111","sequence":33,"generatedAt":821692800,"sentAt":821692802,"programStartedAt":821692800,"aggregateState":"waiting","hasVisibleActivity":true,"proProgram":"brightness 255\n0:#FF0000","dotProgram":"brightness 128\n0:#0000FF"}"#
+        let data = try require(fixture.data(using: .utf8))
+        let frame = try require(try? JSONDecoder().decode(NearbySignalFrame.self, from: data))
+        precondition(frame.version == NearbySignalFrame.protocolVersion)
+        precondition(frame.sequence == 33)
+        precondition(frame.proProgram == "brightness 255\n0:#FF0000")
+        precondition(frame.dotProgram == "brightness 128\n0:#0000FF")
+        let validated = try frame.validated()
+        precondition(validated == frame)
+
+        var line = data
+        line.append(0x0A)
+        var streamDecoder = NearbySignalStreamDecoder()
+        precondition(streamDecoder.append(line) == [frame])
     }
 
     private static func require<T>(_ value: T?) throws -> T {

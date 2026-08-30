@@ -39,6 +39,42 @@ enum NearbyMirroringMode: String, Codable, CaseIterable, Identifiable, Sendable 
     }
 }
 
+enum SidePulseSignalSource: Codable, Equatable, Hashable, Sendable {
+    case thisMac
+    case nearbyMac(String)
+    case allMacs
+
+    var needsNearbySignals: Bool {
+        switch self {
+        case .thisMac: false
+        case .nearbyMac, .allMacs: true
+        }
+    }
+
+    var selectedPeerID: String? {
+        guard case .nearbyMac(let peerID) = self else { return nil }
+        return peerID
+    }
+}
+
+struct NearbySignalServiceConfiguration: Equatable, Sendable {
+    var sharesLocalSignal: Bool
+    var discoversPeers: Bool
+    var followedPeerIDs: Set<String>
+    var followsAllPeers: Bool
+
+    static let localOnly = NearbySignalServiceConfiguration(
+        sharesLocalSignal: false,
+        discoversPeers: false,
+        followedPeerIDs: [],
+        followsAllPeers: false
+    )
+
+    var receivesNearbySignals: Bool {
+        followsAllPeers || !followedPeerIDs.isEmpty
+    }
+}
+
 struct NearbySignalPeer: Identifiable, Equatable, Sendable {
     var id: String
     var displayName: String
@@ -300,25 +336,21 @@ enum NearbySignalRouter {
     static let staleAfter: TimeInterval = 3.5
 
     static func route(
-        mode: NearbyMirroringMode,
-        selectedPeerID: String?,
+        source: SidePulseSignalSource,
         localFrame: NearbySignalFrame,
         receivedSignals: [String: ReceivedNearbySignal],
         now: Date = .now
     ) -> RoutedNearbySignal? {
-        switch mode {
-        case .off, .shareThisMac:
-            return RoutedNearbySignal(
-                frame: localFrame,
-                clockOrigin: localFrame.programStartedAt,
-                isRemote: false
-            )
-        case .followNearbyMac:
-            guard let selectedPeerID,
-                  let signal = receivedSignals[selectedPeerID],
+        switch source {
+        case .thisMac:
+            return localRoute(localFrame)
+        case .nearbyMac(let selectedPeerID):
+            guard let signal = receivedSignals[selectedPeerID],
                   signal.frame.sourceNodeID != localFrame.sourceNodeID,
                   signal.isFresh(at: now)
-            else { return nil }
+            else {
+                return localFrame.hasVisibleActivity ? localRoute(localFrame) : nil
+            }
             return RoutedNearbySignal(
                 frame: signal.frame,
                 clockOrigin: signal.localClockOrigin,
@@ -327,13 +359,7 @@ enum NearbySignalRouter {
         case .allMacs:
             var candidates = [RoutedNearbySignal]()
             if localFrame.hasVisibleActivity {
-                candidates.append(
-                    RoutedNearbySignal(
-                        frame: localFrame,
-                        clockOrigin: localFrame.programStartedAt,
-                        isRemote: false
-                    )
-                )
+                candidates.append(localRoute(localFrame))
             }
             candidates.append(contentsOf: receivedSignals.values.compactMap { signal in
                 guard signal.frame.sourceNodeID != localFrame.sourceNodeID,
@@ -347,7 +373,7 @@ enum NearbySignalRouter {
                 )
             })
 
-            guard let winner = candidates.min(by: { lhs, rhs in
+            return candidates.min { lhs, rhs in
                 if lhs.frame.aggregateState.priority != rhs.frame.aggregateState.priority {
                     return lhs.frame.aggregateState.priority < rhs.frame.aggregateState.priority
                 }
@@ -355,16 +381,46 @@ enum NearbySignalRouter {
                     return lhs.clockOrigin > rhs.clockOrigin
                 }
                 return lhs.frame.sourceNodeID < rhs.frame.sourceNodeID
-            }) else {
-                return RoutedNearbySignal(
-                    frame: localFrame,
-                    clockOrigin: localFrame.programStartedAt,
-                    isRemote: false
-                )
             }
-            return winner
         }
     }
+
+    static func route(
+        mode: NearbyMirroringMode,
+        selectedPeerID: String?,
+        localFrame: NearbySignalFrame,
+        receivedSignals: [String: ReceivedNearbySignal],
+        now: Date = .now
+    ) -> RoutedNearbySignal? {
+        switch mode {
+        case .off, .shareThisMac:
+            return localRoute(localFrame)
+        case .followNearbyMac:
+            guard let selectedPeerID else { return nil }
+            return route(
+                source: .nearbyMac(selectedPeerID),
+                localFrame: localFrame,
+                receivedSignals: receivedSignals,
+                now: now
+            )
+        case .allMacs:
+            return route(
+                source: .allMacs,
+                localFrame: localFrame,
+                receivedSignals: receivedSignals,
+                now: now
+            )
+        }
+    }
+
+    private static func localRoute(_ frame: NearbySignalFrame) -> RoutedNearbySignal {
+        RoutedNearbySignal(
+            frame: frame,
+            clockOrigin: frame.programStartedAt,
+            isRemote: false
+        )
+    }
+
 }
 
 struct NearbySignalStreamDecoder: Sendable {

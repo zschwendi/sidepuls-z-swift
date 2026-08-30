@@ -120,7 +120,7 @@ struct CommandCenterHero: View {
             return "Plug in the device. SidePulse will detect it automatically and show you the exact hardware path."
         }
         if !store.outputPowerIsOn {
-            return "The device is connected, but lighting output is paused. Turn it on to mirror active sessions."
+            return "The device is connected, but lighting output is paused. Turn it on to show active sessions."
         }
         if activeCount == 0 {
             return "Start or resume a Codex task. It will appear here automatically—there is no extra setup step."
@@ -382,7 +382,7 @@ struct SettingsView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
                             SignalModeControl(store: store)
-                            NearbyMirroringCard(store: store)
+                            NearbySignalNetworkCard(store: store)
                         }
                             .frame(maxWidth: 520, alignment: .leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -401,7 +401,7 @@ struct SettingsView: View {
     }
 }
 
-struct NearbyMirroringCard: View {
+struct NearbySignalNetworkCard: View {
     @Bindable var store: CommandCenterStore
 
     var body: some View {
@@ -413,7 +413,7 @@ struct NearbyMirroringCard: View {
                     .frame(width: 34, height: 34)
                     .background(.purple.opacity(0.1), in: .rect(cornerRadius: 11))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Nearby Mac Mirroring").font(.headline)
+                    Text("Nearby Signal Network").font(.headline)
                     Text(store.nearbyDisplayStatusMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -425,50 +425,23 @@ struct NearbyMirroringCard: View {
                     .frame(width: 7, height: 7)
             }
 
-            HStack(spacing: 10) {
-                Text("ROUTE")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Picker("Nearby Mac route", selection: Binding(
-                    get: { store.nearbyMirroringMode },
-                    set: { store.selectNearbyMirroringMode($0) }
-                )) {
-                    ForEach(NearbyMirroringMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(width: 190)
-            }
+            Toggle("Make this Mac available as a signal source", isOn: Binding(
+                get: { store.nearbySharingEnabled },
+                set: { store.setNearbySharingEnabled($0) }
+            ))
+            .toggleStyle(.switch)
 
-            if store.nearbyMirroringMode == .followNearbyMac {
-                HStack(spacing: 10) {
-                    Text("SOURCE")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Picker("Nearby Mac", selection: Binding(
-                        get: { store.selectedNearbyPeerID },
-                        set: { store.selectNearbyPeer($0) }
-                    )) {
-                        Text("Choose a Mac").tag(String?.none)
-                        ForEach(store.nearbyPeers) { peer in
-                            Text(peer.displayName).tag(Optional(peer.id))
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(width: 190)
-                }
-            }
+            Toggle("Discover signal sources on nearby Macs", isOn: Binding(
+                get: { store.nearbyDiscoveryEnabled },
+                set: { store.setNearbyDiscoveryEnabled($0) }
+            ))
+            .toggleStyle(.switch)
 
-            Text(store.nearbyMirroringMode.detail)
+            Text("Each SidePulse chooses its own source on the Hardware page. Turning discovery off returns every output to This Mac.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if store.nearbyMirroringMode.receivesNearbySignals {
+            if store.nearbyDiscoveryEnabled {
                 HStack(spacing: 6) {
                     Image(systemName: "desktopcomputer")
                     Text(store.nearbyPeers.isEmpty
@@ -484,7 +457,9 @@ struct NearbyMirroringCard: View {
             }
 
             Label(
-                "Local only: shares compiled LED programs, state, and timing—not agent names, messages, projects, or paths.",
+                store.nearbySharingEnabled
+                    ? "Local network only: shares compiled LED programs, state, and timing—not agent names, messages, projects, or paths."
+                    : "Nothing leaves this Mac unless nearby sharing is turned on.",
                 systemImage: "lock.shield.fill"
             )
             .font(.caption2)
@@ -495,13 +470,10 @@ struct NearbyMirroringCard: View {
     }
 
     private var statusColor: Color {
-        switch store.nearbyMirroringMode {
-        case .off: .secondary
-        case .shareThisMac: .cyan
-        case .followNearbyMac:
-            store.selectedNearbySignalIsFresh ? .green : .orange
-        case .allMacs: .purple
-        }
+        if store.nearbySharingEnabled && store.nearbyDiscoveryEnabled { return .purple }
+        if store.nearbySharingEnabled { return .cyan }
+        if store.nearbyDiscoveryEnabled { return .green }
+        return .secondary
     }
 }
 
@@ -1681,36 +1653,42 @@ private struct AgentTimelineRow: View {
 struct HardwareView: View {
     @Bindable var store: CommandCenterStore
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                Text("Hardware").font(.largeTitle.bold())
-                Spacer()
-                Toggle("Live output", isOn: Binding(
-                    get: { store.outputPowerIsOn },
-                    set: { store.setOutputPower($0) }
-                ))
-                .toggleStyle(.switch)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("SidePulse Devices").font(.largeTitle.bold())
+                        Text("Every connected device is a standalone output. Choose its signal source and tune it independently.")
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Toggle("Live output", isOn: Binding(
+                        get: { store.outputPowerIsOn },
+                        set: { store.setOutputPower($0) }
+                    ))
+                    .toggleStyle(.switch)
+                }
+
+                ForEach(store.hardwareDevices, id: \.kind) { device in
+                    HardwareDeviceCard(store: store, device: device)
+                }
+
+                EjectPreventionRow(store: store)
+
+                Label("The global power and max-brightness controls still apply to every output.", systemImage: "memorychip")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("Local Compiled LED Scene").font(.headline)
+                Text(store.scene.program)
+                    .textSelection(.enabled)
+                    .font(.body.monospaced())
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.black.opacity(0.45), in: .rect(cornerRadius: 16))
             }
-
-            ForEach(store.hardwareDevices, id: \.path) { device in
-                HardwareDeviceCard(device: device)
-            }
-
-            EjectPreventionRow(store: store)
-
-            Label("Live Output is remembered between launches.", systemImage: "memorychip")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Text("Compiled LED Scene").font(.headline)
-            Text(store.scene.program)
-                .textSelection(.enabled)
-                .font(.body.monospaced())
-                .padding(18)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.black.opacity(0.45), in: .rect(cornerRadius: 16))
-            Spacer()
         }
+        .scrollIndicators(.hidden)
     }
 }
 
@@ -1760,50 +1738,144 @@ struct EjectPreventionRow: View {
 }
 
 struct HardwareDeviceCard: View {
+    @Bindable var store: CommandCenterStore
     let device: DeviceState
+    @State private var showsCalibration = false
+
+    private var kind: SidePulseDeviceKind { device.kind }
+    private var calibration: SidePulseOutputCalibration {
+        store.outputCalibration(for: kind)
+    }
 
     var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: device.connected ? "externaldrive.fill.badge.checkmark" : "externaldrive.fill")
-                .font(.system(size: 34))
-                .foregroundStyle(device.connected ? .green : .secondary)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 9) {
-                    Text(device.name).font(.title3.bold())
-                    Text(device.ledCount == 8 ? "8-LED PRIMARY" : "2-LED MIRROR")
-                        .font(.caption2.bold())
-                        .foregroundStyle(device.connected ? .primary : .secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.white.opacity(device.connected ? 0.12 : 0.06), in: .capsule)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 16) {
+                Image(systemName: device.connected ? "externaldrive.fill.badge.checkmark" : "externaldrive.fill")
+                    .font(.system(size: 34))
+                    .foregroundStyle(device.connected ? .green : .secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 9) {
+                        Text(device.name).font(.title3.bold())
+                        Text("\(device.ledCount)-LED OUTPUT")
+                            .font(.caption2.bold())
+                            .foregroundStyle(device.connected ? .primary : .secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.white.opacity(device.connected ? 0.12 : 0.06), in: .capsule)
+                    }
+                    Text(device.connected ? "Connected · standalone" : "Ready for standalone use")
+                        .foregroundStyle(.secondary)
                 }
-                Text(device.connected ? "Connected" : "Waiting for device")
-                    .foregroundStyle(.secondary)
-                Text(device.ledCount == 8
-                    ? "Eight-LED scene stays unchanged as the primary output."
-                    : "40% brightness · 25% blue compensation · fluid two-dot fade.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if device.connected {
-                    Text(device.path)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.tertiary)
-                        .textSelection(.enabled)
+                Spacer()
+                Picker("Signal Source", selection: Binding(
+                    get: { store.signalSource(for: kind) },
+                    set: { store.selectSignalSource($0, for: kind) }
+                )) {
+                    Text("This Mac").tag(SidePulseSignalSource.thisMac)
+                    Text("All Macs").tag(SidePulseSignalSource.allMacs)
+                    if case .nearbyMac(let selectedPeerID) = store.signalSource(for: kind),
+                       !store.nearbyPeers.contains(where: { $0.id == selectedPeerID }) {
+                        Text("Unavailable Mac")
+                            .tag(SidePulseSignalSource.nearbyMac(selectedPeerID))
+                    }
+                    ForEach(store.nearbyPeers) { peer in
+                        Text(peer.displayName).tag(SidePulseSignalSource.nearbyMac(peer.id))
+                    }
                 }
-                if let error = device.lastError {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                } else if let lastWrite = device.lastWrite {
-                    Label("Last write \(lastWrite.formatted(date: .omitted, time: .standard))", systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
+                .pickerStyle(.menu)
+                .frame(width: 180)
+            }
+
+            HStack(spacing: 8) {
+                Label(store.signalSourceStatus(for: kind), systemImage: "point.3.connected.trianglepath.dotted")
+                if !store.nearbyDiscoveryEnabled,
+                   store.signalSource(for: kind).needsNearbySignals {
+                    Text("· discovery required")
                 }
             }
-            Spacer()
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            Text(kind == .pro
+                ? "Full eight-LED rendering for local, nearby, or combined agent activity."
+                : "The same agent states rendered independently across two LEDs—no Pro required.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if device.connected {
+                Text(device.path)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+            }
+
+            if let error = device.lastError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else if let lastWrite = device.lastWrite {
+                Label("Last write \(lastWrite.formatted(date: .omitted, time: .standard))", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+
+            Divider()
+
+            DisclosureGroup("Output calibration", isExpanded: $showsCalibration) {
+                VStack(alignment: .leading, spacing: 12) {
+                    calibrationSlider(
+                        title: "Device brightness",
+                        value: calibration.brightnessScale,
+                        range: 0.1...1.5
+                    ) { value in
+                        store.updateOutputCalibration(for: kind) { $0.brightnessScale = value }
+                    }
+                    calibrationSlider(
+                        title: "Blue balance",
+                        value: calibration.blueScale,
+                        range: 0.5...1.25
+                    ) { value in
+                        store.updateOutputCalibration(for: kind) { $0.blueScale = value }
+                    }
+                    HStack {
+                        Text("Automatic default: \(Int(kind.defaultOutputCalibration.brightnessScale * 100))% brightness · \(Int(kind.defaultOutputCalibration.blueScale * 100))% blue")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                        Button("Reset") {
+                            store.resetOutputCalibration(for: kind)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(calibration == kind.defaultOutputCalibration)
+                    }
+                }
+                .padding(.top, 10)
+            }
         }
         .padding(22)
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
+    }
+
+    @ViewBuilder
+    private func calibrationSlider(
+        title: String,
+        value: Double,
+        range: ClosedRange<Double>,
+        onChange: @escaping (Double) -> Void
+    ) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .frame(width: 110, alignment: .leading)
+            Slider(
+                value: Binding(get: { value }, set: onChange),
+                in: range
+            )
+            Text("\(Int((value * 100).rounded()))%")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 42, alignment: .trailing)
+        }
     }
 }
 
@@ -1903,7 +1975,7 @@ struct BatterySettingsCard: View {
                         Label("Preview", systemImage: "play.fill")
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!store.proDevice.connected)
+                    .disabled(!store.hardwareDevices.contains(where: \.connected))
                     Spacer()
                 }
                 Text(store.batterySettings.mode.detail)

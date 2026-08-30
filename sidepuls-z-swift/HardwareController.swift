@@ -69,6 +69,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
         enabled: Bool,
         program: String,
         brightnessScale: Double = 1,
+        outputCalibration: SidePulseOutputCalibration? = nil,
         timing: HardwareUpdateTiming = .immediate
     ) {
         queue.async { [weak self] in
@@ -76,9 +77,10 @@ final class SidePulseHardwareController: @unchecked Sendable {
             let calibratedProgram = LEDProgramOutputCalibration.applying(
                 to: program,
                 brightnessScale: kind.calibratedBrightnessScale(
-                    universalBrightness: brightnessScale
+                    universalBrightness: brightnessScale,
+                    calibration: outputCalibration
                 ),
-                blueScale: kind.outputBlueScale
+                blueScale: (outputCalibration ?? kind.defaultOutputCalibration).normalized.blueScale
             )
             let wasEnabled = outputEnabled
             let enabledChanged = enabled != outputEnabled
@@ -127,6 +129,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
     func preview(
         program: String,
         brightnessScale: Double = 1,
+        outputCalibration: SidePulseOutputCalibration? = nil,
         duration: TimeInterval = 3
     ) {
         queue.async { [weak self] in
@@ -134,9 +137,10 @@ final class SidePulseHardwareController: @unchecked Sendable {
             let calibratedProgram = LEDProgramOutputCalibration.applying(
                 to: program,
                 brightnessScale: kind.calibratedBrightnessScale(
-                    universalBrightness: brightnessScale
+                    universalBrightness: brightnessScale,
+                    calibration: outputCalibration
                 ),
-                blueScale: kind.outputBlueScale
+                blueScale: (outputCalibration ?? kind.defaultOutputCalibration).normalized.blueScale
             )
             cancelDeferredWriteLocked()
             previewGeneration += 1

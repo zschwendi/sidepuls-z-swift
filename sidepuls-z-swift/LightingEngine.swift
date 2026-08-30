@@ -13,8 +13,8 @@ enum LEDProgramOutputCalibration {
     }
 
     static func scalingBrightness(in program: String, by scale: Double) -> String {
-        let clampedScale = max(0, min(1, scale))
-        guard clampedScale < 1, program != "off" else { return program }
+        let clampedScale = max(0, min(1.5, scale))
+        guard clampedScale != 1, program != "off" else { return program }
 
         var lines = program.components(separatedBy: "\n")
         if let brightnessIndex = lines.firstIndex(where: { $0.hasPrefix("brightness ") }),
@@ -23,7 +23,7 @@ enum LEDProgramOutputCalibration {
             lines[brightnessIndex] = "brightness \(max(0, min(255, calibrated)))"
         } else {
             let calibrated = Int((255 * clampedScale).rounded())
-            lines.insert("brightness \(calibrated)", at: 0)
+            lines.insert("brightness \(max(0, min(255, calibrated)))", at: 0)
         }
         return lines.joined(separator: "\n")
     }
@@ -41,8 +41,8 @@ enum LEDProgramOutputCalibration {
     }
 
     static func scalingBlue(in program: String, by scale: Double) -> String {
-        let clampedScale = max(0, min(1, scale))
-        guard clampedScale < 1 else { return program }
+        let clampedScale = max(0, min(1.25, scale))
+        guard clampedScale != 1 else { return program }
 
         var result = ""
         var cursor = program.startIndex

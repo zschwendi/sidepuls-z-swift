@@ -656,6 +656,10 @@ struct DeviceState: Equatable, Sendable {
     var sourceProgram = "off"
     var lastWrite: Date?
     var lastError: String?
+
+    var kind: SidePulseDeviceKind {
+        ledCount == SidePulseDeviceKind.dot.ledCount ? .dot : .pro
+    }
 }
 
 enum BatteryIndicatorMode: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -718,9 +722,23 @@ struct BatteryIndicatorSettings: Codable, Equatable, Sendable {
     }
 }
 
-enum SidePulseDeviceKind: String, CaseIterable, Sendable {
+struct SidePulseOutputCalibration: Codable, Equatable, Sendable {
+    var brightnessScale: Double
+    var blueScale: Double
+
+    var normalized: SidePulseOutputCalibration {
+        SidePulseOutputCalibration(
+            brightnessScale: max(0.1, min(1.5, brightnessScale)),
+            blueScale: max(0.5, min(1.25, blueScale))
+        )
+    }
+}
+
+enum SidePulseDeviceKind: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
     case pro
     case dot
+
+    var id: String { rawValue }
 
     var name: String {
         switch self {
@@ -737,21 +755,28 @@ enum SidePulseDeviceKind: String, CaseIterable, Sendable {
     }
 
     var outputBrightnessScale: Double {
+        defaultOutputCalibration.brightnessScale
+    }
+
+    var defaultOutputCalibration: SidePulseOutputCalibration {
         switch self {
-        case .pro: 1
-        case .dot: 0.4
+        case .pro:
+            SidePulseOutputCalibration(brightnessScale: 1, blueScale: 1)
+        case .dot:
+            SidePulseOutputCalibration(brightnessScale: 0.4, blueScale: 0.75)
         }
     }
 
-    func calibratedBrightnessScale(universalBrightness: Double) -> Double {
-        outputBrightnessScale * max(0, min(1, universalBrightness))
+    func calibratedBrightnessScale(
+        universalBrightness: Double,
+        calibration: SidePulseOutputCalibration? = nil
+    ) -> Double {
+        (calibration ?? defaultOutputCalibration).normalized.brightnessScale
+            * max(0, min(1, universalBrightness))
     }
 
     var outputBlueScale: Double {
-        switch self {
-        case .pro: 1
-        case .dot: 0.75
-        }
+        defaultOutputCalibration.blueScale
     }
 
     var fallbackPath: String {
