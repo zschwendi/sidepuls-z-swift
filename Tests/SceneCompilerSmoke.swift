@@ -221,6 +221,27 @@ enum SceneCompilerSmoke {
             precondition(scene.program.utf8.count <= 512, "\(mode.title) exceeds the firmware limit")
         }
 
+        let onBattery = BatteryState(
+            chargeFraction: 0.7,
+            isCharging: false,
+            isExternallyPowered: false
+        )
+        let onCharger = BatteryState(
+            chargeFraction: 0.7,
+            isCharging: true,
+            isExternallyPowered: true
+        )
+        let chargedButIdle = BatteryState(
+            chargeFraction: 0.71,
+            isCharging: false,
+            isExternallyPowered: true
+        )
+        precondition(!BatteryState.chargerConnectionChanged(from: nil, to: onBattery))
+        precondition(BatteryState.chargerConnectionChanged(from: onBattery, to: onCharger))
+        precondition(BatteryState.chargerConnectionChanged(from: onCharger, to: onBattery))
+        precondition(!BatteryState.chargerConnectionChanged(from: onCharger, to: chargedButIdle))
+        precondition(!BatteryState.chargerConnectionChanged(from: onBattery, to: nil))
+
         let brightnessPreview = LEDFirmwareProgram(
             program: "brightness 128\n0:#FF0000;1:#00FF00",
             ledCount: 2

@@ -374,6 +374,14 @@ struct BatteryState: Equatable, Sendable {
     var isCharging: Bool
     var isExternallyPowered: Bool
 
+    static func chargerConnectionChanged(
+        from previous: BatteryState?,
+        to current: BatteryState?
+    ) -> Bool {
+        guard let previous, let current else { return false }
+        return previous.isExternallyPowered != current.isExternallyPowered
+    }
+
     var isLowAndDischarging: Bool {
         chargeFraction <= 0.25 && !isCharging && !isExternallyPowered
     }

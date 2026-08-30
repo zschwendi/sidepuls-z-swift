@@ -213,10 +213,21 @@ enum ProfileLibrarySmoke {
         var batterySettings = BatteryIndicatorSettings()
         batterySettings.mode = .statusBottom
         batterySettings.showsWhenLidCloses = false
+        batterySettings.showsWhenPowerSourceChanges = false
         batterySettings.lowBatteryThresholdPercent = 30
         batterySettings.lowBatteryReminderIntervalSeconds = 45
         AppPreferences.saveBatteryIndicatorSettings(batterySettings, to: preferencesDefaults)
         precondition(AppPreferences.batteryIndicatorSettings(from: preferencesDefaults) == batterySettings)
+
+        let legacyBatteryJSON = #"{"showsChargeInfo":true,"mode":"greenOutline","showsWhenLidOpens":false,"showsWhenLidCloses":true,"lowBatteryReminderEnabled":false,"lowBatteryThresholdPercent":35,"lowBatteryReminderIntervalSeconds":60}"#.data(using: .utf8)!
+        preferencesDefaults.set(legacyBatteryJSON, forKey: "sidepulse.battery-indicator.v1")
+        let migratedBatterySettings = AppPreferences.batteryIndicatorSettings(
+            from: preferencesDefaults
+        )
+        precondition(migratedBatterySettings.mode == .greenOutline)
+        precondition(!migratedBatterySettings.showsWhenLidOpens)
+        precondition(migratedBatterySettings.showsWhenPowerSourceChanges)
+        precondition(migratedBatterySettings.lowBatteryThresholdPercent == 35)
 
         let identityMigrationSuite = "sidepulse.identity-migration-smoke.\(UUID().uuidString)"
         let identityMigrationDefaults = UserDefaults(suiteName: identityMigrationSuite)!

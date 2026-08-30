@@ -52,7 +52,7 @@ struct ContentView: View {
         case .profiles: ProfilesView(store: store)
         case .agents: AgentsView(store: store)
         case .hardware: HardwareView(store: store)
-        case .system: SystemView(store: store)
+        case .system: ConnectionsView(store: store)
         case .diagnostics: DiagnosticsView(store: store)
         case .settings: SettingsView(store: store)
         }
@@ -351,7 +351,7 @@ struct SignalModeControl: View {
 }
 
 private enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, profiles, connections, diagnostics
+    case general, profiles, battery, connections, diagnostics
 
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
@@ -373,7 +373,7 @@ struct SettingsView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
-                .frame(width: 390)
+                .frame(width: 500)
             }
 
             Group {
@@ -390,8 +390,10 @@ struct SettingsView: View {
                     .scrollIndicators(.hidden)
                 case .profiles:
                     ProfilesView(store: store)
+                case .battery:
+                    BatteryView(store: store)
                 case .connections:
-                    SystemView(store: store)
+                    ConnectionsView(store: store)
                 case .diagnostics:
                     DiagnosticsView(store: store)
                 }
@@ -1879,21 +1881,37 @@ struct HardwareDeviceCard: View {
     }
 }
 
-struct SystemView: View {
+struct BatteryView: View {
+    @Bindable var store: CommandCenterStore
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Battery").font(.largeTitle.bold())
+                    Text("Choose when SidePulse briefly shows your Mac's current charge.")
+                        .foregroundStyle(.secondary)
+                }
+                BatterySettingsCard(store: store)
+                Spacer()
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+}
+
+struct ConnectionsView: View {
     @Bindable var store: CommandCenterStore
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Connections & Battery").font(.largeTitle.bold())
-                        Text("Agent signals and the system scenes that temporarily take over your SidePulse.")
+                        Text("Connections").font(.largeTitle.bold())
+                        Text("Agent integrations that provide live SidePulse status.")
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
                 }
-                BatterySettingsCard(store: store)
-                Divider()
                 ForEach(store.integrations) { integration in
                     IntegrationStatusCard(integration: integration)
                 }
@@ -1983,10 +2001,18 @@ struct BatterySettingsCard: View {
                     .foregroundStyle(.secondary)
 
                 Divider()
-                HStack(spacing: 24) {
-                    Toggle("When lid is opened", isOn: settingBinding(\.showsWhenLidOpens))
-                    Toggle("When lid is closed", isOn: settingBinding(\.showsWhenLidCloses))
-                    Spacer()
+                Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 12) {
+                    GridRow {
+                        Toggle("When lid is opened", isOn: settingBinding(\.showsWhenLidOpens))
+                        Toggle("When lid is closed", isOn: settingBinding(\.showsWhenLidCloses))
+                    }
+                    GridRow {
+                        Toggle(
+                            "When charger connects or disconnects",
+                            isOn: settingBinding(\.showsWhenPowerSourceChanges)
+                        )
+                        .gridCellColumns(2)
+                    }
                 }
                 .toggleStyle(.switch)
 

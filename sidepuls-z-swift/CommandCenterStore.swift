@@ -1105,7 +1105,19 @@ final class CommandCenterStore {
     }
 
     private func handleBatteryUpdate(_ state: BatteryState?) {
+        let previousState = batteryState
         if batteryState != state { batteryState = state }
+        let chargerConnectionChanged = BatteryState.chargerConnectionChanged(
+            from: previousState,
+            to: state
+        )
+        let showedChargerPreview = batterySettings.showsChargeInfo
+            && batterySettings.showsWhenPowerSourceChanges
+            && chargerConnectionChanged
+        if showedChargerPreview {
+            previewBatteryIndicator()
+        }
+
         let threshold = Double(batterySettings.lowBatteryThresholdPercent) / 100
         guard batterySettings.showsChargeInfo,
               batterySettings.lowBatteryReminderEnabled,
@@ -1119,6 +1131,10 @@ final class CommandCenterStore {
         }
 
         let now = Date.now
+        if showedChargerPreview {
+            lastLowBatteryAlertAt = now
+            return
+        }
         let interval = TimeInterval(batterySettings.lowBatteryReminderIntervalSeconds)
         guard lastLowBatteryAlertAt.map({ now.timeIntervalSince($0) >= interval }) ?? true else { return }
         lastLowBatteryAlertAt = now

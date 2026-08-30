@@ -710,9 +710,80 @@ struct BatteryIndicatorSettings: Codable, Equatable, Sendable {
     var mode: BatteryIndicatorMode = .levelColorOutline
     var showsWhenLidOpens = true
     var showsWhenLidCloses = true
+    var showsWhenPowerSourceChanges = true
     var lowBatteryReminderEnabled = true
     var lowBatteryThresholdPercent = 25
     var lowBatteryReminderIntervalSeconds = 15
+
+    private enum CodingKeys: String, CodingKey {
+        case showsChargeInfo
+        case mode
+        case showsWhenLidOpens
+        case showsWhenLidCloses
+        case showsWhenPowerSourceChanges
+        case lowBatteryReminderEnabled
+        case lowBatteryThresholdPercent
+        case lowBatteryReminderIntervalSeconds
+    }
+
+    init(
+        showsChargeInfo: Bool = true,
+        mode: BatteryIndicatorMode = .levelColorOutline,
+        showsWhenLidOpens: Bool = true,
+        showsWhenLidCloses: Bool = true,
+        showsWhenPowerSourceChanges: Bool = true,
+        lowBatteryReminderEnabled: Bool = true,
+        lowBatteryThresholdPercent: Int = 25,
+        lowBatteryReminderIntervalSeconds: Int = 15
+    ) {
+        self.showsChargeInfo = showsChargeInfo
+        self.mode = mode
+        self.showsWhenLidOpens = showsWhenLidOpens
+        self.showsWhenLidCloses = showsWhenLidCloses
+        self.showsWhenPowerSourceChanges = showsWhenPowerSourceChanges
+        self.lowBatteryReminderEnabled = lowBatteryReminderEnabled
+        self.lowBatteryThresholdPercent = lowBatteryThresholdPercent
+        self.lowBatteryReminderIntervalSeconds = lowBatteryReminderIntervalSeconds
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        showsChargeInfo = try container.decodeIfPresent(Bool.self, forKey: .showsChargeInfo) ?? true
+        mode = try container.decodeIfPresent(BatteryIndicatorMode.self, forKey: .mode) ?? .levelColorOutline
+        showsWhenLidOpens = try container.decodeIfPresent(Bool.self, forKey: .showsWhenLidOpens) ?? true
+        showsWhenLidCloses = try container.decodeIfPresent(Bool.self, forKey: .showsWhenLidCloses) ?? true
+        showsWhenPowerSourceChanges = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .showsWhenPowerSourceChanges
+        ) ?? true
+        lowBatteryReminderEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .lowBatteryReminderEnabled
+        ) ?? true
+        lowBatteryThresholdPercent = try container.decodeIfPresent(
+            Int.self,
+            forKey: .lowBatteryThresholdPercent
+        ) ?? 25
+        lowBatteryReminderIntervalSeconds = try container.decodeIfPresent(
+            Int.self,
+            forKey: .lowBatteryReminderIntervalSeconds
+        ) ?? 15
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(showsChargeInfo, forKey: .showsChargeInfo)
+        try container.encode(mode, forKey: .mode)
+        try container.encode(showsWhenLidOpens, forKey: .showsWhenLidOpens)
+        try container.encode(showsWhenLidCloses, forKey: .showsWhenLidCloses)
+        try container.encode(showsWhenPowerSourceChanges, forKey: .showsWhenPowerSourceChanges)
+        try container.encode(lowBatteryReminderEnabled, forKey: .lowBatteryReminderEnabled)
+        try container.encode(lowBatteryThresholdPercent, forKey: .lowBatteryThresholdPercent)
+        try container.encode(
+            lowBatteryReminderIntervalSeconds,
+            forKey: .lowBatteryReminderIntervalSeconds
+        )
+    }
 
     var normalized: BatteryIndicatorSettings {
         var result = self
