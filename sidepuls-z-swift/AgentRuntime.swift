@@ -1,16 +1,43 @@
 import Darwin
 import Foundation
 
-struct TerminalAcknowledgements: Codable, Sendable {
+struct AgentAlertAcknowledgements: Codable, Sendable {
     private(set) var acknowledgedAt: [String: Date] = [:]
+    private(set) var acknowledgedStates: [String: AgentState] = [:]
 
+    // Keep the existing keys so acknowledgements survive an app update.
     private static let storageKey = "sidepulse.completion-acknowledgements.v1"
     private static let bootstrapKey = "sidepulse.completion-acknowledgements-bootstrapped.v1"
 
-    static func load(from defaults: UserDefaults = .standard) -> TerminalAcknowledgements {
+    private enum CodingKeys: String, CodingKey {
+        case acknowledgedAt
+        case acknowledgedStates
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        acknowledgedAt = try container.decodeIfPresent(
+            [String: Date].self,
+            forKey: .acknowledgedAt
+        ) ?? [:]
+        acknowledgedStates = try container.decodeIfPresent(
+            [String: AgentState].self,
+            forKey: .acknowledgedStates
+        ) ?? [:]
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(acknowledgedAt, forKey: .acknowledgedAt)
+        try container.encode(acknowledgedStates, forKey: .acknowledgedStates)
+    }
+
+    static func load(from defaults: UserDefaults = .standard) -> AgentAlertAcknowledgements {
         guard let data = defaults.data(forKey: storageKey),
-              let stored = try? JSONDecoder().decode(TerminalAcknowledgements.self, from: data)
-        else { return TerminalAcknowledgements() }
+              let stored = try? JSONDecoder().decode(AgentAlertAcknowledgements.self, from: data)
+        else { return AgentAlertAcknowledgements() }
         return stored
     }
 
@@ -24,7 +51,9 @@ struct TerminalAcknowledgements: Codable, Sendable {
         defaults: UserDefaults = .standard
     ) -> Bool {
         guard !defaults.bool(forKey: Self.bootstrapKey) else { return false }
-        let changed = acknowledge(sessions)
+        // This migration exists only to prevent old finished work from flooding
+        // a new install. Never silently dismiss a live approval or failure.
+        let changed = acknowledge(sessions.filter { $0.state == .completed })
         save(to: defaults)
         defaults.set(true, forKey: Self.bootstrapKey)
         return changed
@@ -36,21 +65,54 @@ struct TerminalAcknowledgements: Codable, Sendable {
         at date: Date = .now
     ) -> Bool {
         var changed = false
-        for session in sessions where session.isAcknowledgableTerminalAlert {
+        for session in sessions where session.isAcknowledgableAlert {
             guard sessionID == nil || session.id == sessionID else { continue }
             let resolvedDate = max(date, session.updatedAt)
-            if acknowledgedAt[session.id] != resolvedDate {
+            if acknowledgedAt[session.id] != resolvedDate
+                || acknowledgedStates[session.id] != session.state {
                 acknowledgedAt[session.id] = resolvedDate
+                acknowledgedStates[session.id] = session.state
                 changed = true
             }
         }
         return changed
     }
 
+    /// Clear an acknowledgement only after the runtime observes a real state
+    /// transition. Refreshing the same yellow, red, or green signal must not
+    /// resurrect an alert the user already opened.
+    mutating func reconcile(with sessions: [AgentSession]) -> Bool {
+        let sessionsByID = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        let acknowledgedIDs = Set(acknowledgedAt.keys).union(acknowledgedStates.keys)
+        var changed = false
+
+        for sessionID in acknowledgedIDs {
+            guard let session = sessionsByID[sessionID] else { continue }
+            if let acknowledgedState = acknowledgedStates[sessionID] {
+                guard !session.isAcknowledgableAlert || acknowledgedState != session.state else {
+                    continue
+                }
+            } else if session.isAcknowledgableAlert,
+                      let acknowledgedDate = acknowledgedAt[sessionID],
+                      session.updatedAt <= acknowledgedDate {
+                // Build 38 stored only a date. Bind that legacy acknowledgement
+                // to the first matching state so later mtime-only refreshes stay quiet.
+                acknowledgedStates[sessionID] = session.state
+                changed = true
+                continue
+            }
+            acknowledgedAt[sessionID] = nil
+            acknowledgedStates[sessionID] = nil
+            changed = true
+        }
+        return changed
+    }
+
     func shouldDisplay(_ session: AgentSession) -> Bool {
-        guard session.isAcknowledgableTerminalAlert,
-              let date = acknowledgedAt[session.id]
-        else { return true }
+        guard session.isAcknowledgableAlert else { return true }
+        if acknowledgedStates[session.id] == session.state { return false }
+        guard acknowledgedStates[session.id] == nil,
+              let date = acknowledgedAt[session.id] else { return true }
         return session.updatedAt > date
     }
 }
@@ -138,7 +200,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
     private var server: LocalUnixEventServer?
     private var timer: DispatchSourceTimer?
     private var sessions: [String: AgentSession] = [:]
-    private var terminalAcknowledgements = TerminalAcknowledgements.load()
+    private var alertAcknowledgements = AgentAlertAcknowledgements.load()
     private var discoveredKeys: Set<String> = []
     private var discoveredTranscriptURLs: [String: URL] = [:]
     private var cloudKeys: Set<String> = []
@@ -216,15 +278,19 @@ final class NativeAgentRuntime: @unchecked Sendable {
         }
     }
 
-    func acknowledgeTerminal(sessionID: String? = nil) {
+    func acknowledgeAlert(_ alert: AgentSession) {
         queue.async { [weak self] in
             guard let self else { return }
-            let changed = terminalAcknowledgements.acknowledge(
-                Array(sessions.values),
-                sessionID: sessionID
+            guard let current = sessions[alert.id],
+                  current.updatedAt == alert.updatedAt,
+                  current.isAcknowledgableAlert
+            else { return }
+            let changed = alertAcknowledgements.acknowledge(
+                [current],
+                sessionID: current.id
             )
             if changed {
-                terminalAcknowledgements.save()
+                alertAcknowledgements.save()
                 publishLocked(force: true)
             }
         }
@@ -240,7 +306,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
         }
         loadLatestStateLocked(force: true)
         if usesPersistentAppState,
-           terminalAcknowledgements.acknowledgeExistingIfNeeded(Array(sessions.values)) {
+           alertAcknowledgements.acknowledgeExistingIfNeeded(Array(sessions.values)) {
             publishLocked(force: true)
         }
 
@@ -412,11 +478,15 @@ final class NativeAgentRuntime: @unchecked Sendable {
     }
 
     private func visibleSessionsLocked() -> [AgentSession] {
-        sessions.values
+        let allSessions = Array(sessions.values)
+        if alertAcknowledgements.reconcile(with: allSessions) {
+            alertAcknowledgements.save()
+        }
+        return allSessions
             .filter { session in
                 guard AgentTimelinePolicy.includes(session) else { return false }
                 if session.state == .idle { return false }
-                return terminalAcknowledgements.shouldDisplay(session)
+                return alertAcknowledgements.shouldDisplay(session)
             }
             .sorted {
                 if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
@@ -942,8 +1012,8 @@ private extension NativeAgentRuntime {
 
     func shouldContinueTracking(_ session: AgentSession) -> Bool {
         if session.state == .idle { return false }
-        if session.isAcknowledgableTerminalAlert {
-            return terminalAcknowledgements.shouldDisplay(session)
+        if session.isAcknowledgableAlert {
+            return alertAcknowledgements.shouldDisplay(session)
         }
         return true
     }

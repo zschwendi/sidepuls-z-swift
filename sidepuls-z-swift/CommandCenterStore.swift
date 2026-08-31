@@ -594,13 +594,16 @@ final class CommandCenterStore {
     }
 
     func openAgent(_ agent: AgentSession) {
-        if agent.isAcknowledgableTerminalAlert {
-            runtime?.acknowledgeTerminal(sessionID: agent.id)
+        if agent.isAcknowledgableAlert {
+            runtime?.acknowledgeAlert(agent)
         }
         openAgentDestination(agent)
     }
 
     func openHistoricalAgent(_ agent: AgentSession) {
+        if agent.isAcknowledgableAlert {
+            runtime?.acknowledgeAlert(agent)
+        }
         openAgentDestination(agent)
     }
 

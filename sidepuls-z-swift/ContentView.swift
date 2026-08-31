@@ -132,7 +132,7 @@ struct CommandCenterHero: View {
             return "The full array shows one prioritized state across \(activeCount) detected session\(activeCount == 1 ? "" : "s"). Tool activity is included in Thinking."
         }
         if finishedPlacement != nil {
-            return "Green stays lit until the result is acknowledged. Open the finished session, return to Codex, or open the lid when you are ready for the next run."
+            return "Green stays lit until the result is acknowledged. Open the finished session when you are ready for the next run."
         }
         let noun = activeCount == 1 ? "session" : "sessions"
         return "\(activeCount) active \(noun) mapped to the physical array. State changes update color and motion without reshuffling the agents."
@@ -708,7 +708,7 @@ struct AgentGridView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Sessions on the array").font(.title2.bold())
-            Text("Select a session to open it. Finished sessions are acknowledged when opened.")
+            Text("Select a session to open it. Finished, approval, and failed signals are acknowledged when opened.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             let placements = store.scene.placementsTopToBottom
@@ -730,7 +730,13 @@ struct AgentGridView: View {
             } else {
                 LazyVGrid(columns: [.init(.flexible()), .init(.flexible())], spacing: 12) {
                     ForEach(placements) { placement in
-                        AgentCard(agent: placement.agent, profile: store.selectedProfile)
+                        Button {
+                            store.openAgent(placement.agent)
+                        } label: {
+                            AgentCard(agent: placement.agent, profile: store.selectedProfile)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open \(placement.agent.name)")
                     }
                 }
             }

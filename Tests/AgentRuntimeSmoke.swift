@@ -23,7 +23,7 @@ private final class RuntimeProbe: @unchecked Sendable {
 @main
 enum AgentRuntimeSmoke {
     static func main() throws {
-        testTerminalAcknowledgements()
+        testAgentAlertAcknowledgements()
         testAgentTimelinePolicy()
         testAgentOpenRouting()
         testGrokBotInferenceStability()
@@ -69,8 +69,9 @@ enum AgentRuntimeSmoke {
             recordType: "response_item",
             payload: ["type": "custom_tool_call", "name": "exec"]
         )
+        let approvalURL = transcriptFolder.appending(path: "approval.jsonl")
         try writeTranscript(
-            url: transcriptFolder.appending(path: "approval.jsonl"),
+            url: approvalURL,
             id: approvalID,
             recordType: "response_item",
             payload: [
@@ -196,19 +197,55 @@ enum AgentRuntimeSmoke {
             "Grok Bot sessions must use the app's supported open route"
         )
 
-        runtime.acknowledgeTerminal(sessionID: "codex:session:\(completedID)")
-        Thread.sleep(forTimeInterval: 0.5)
+        guard let completedAgent = agents.first(where: { $0.sessionID == completedID }),
+              let stoppedAgent = agents.first(where: { $0.sessionID == abortedID }),
+              let approvalAgent = agents.first(where: { $0.sessionID == approvalID })
+        else {
+            preconditionFailure("Expected alert fixtures before acknowledgement")
+        }
+
+        runtime.acknowledgeAlert(completedAgent)
+        precondition(
+            waitForAbsent(probe: probe, sessionID: completedID),
+            "Explicitly selecting the finished session must acknowledge it"
+        )
         (agents, integrations) = probe.snapshot()
         precondition(
             !agents.contains(where: { $0.sessionID == completedID }),
             "Explicitly selecting the finished session must acknowledge it"
         )
-        runtime.acknowledgeTerminal(sessionID: "codex:session:\(abortedID)")
-        Thread.sleep(forTimeInterval: 0.5)
+        runtime.acknowledgeAlert(stoppedAgent)
+        precondition(
+            waitForAbsent(probe: probe, sessionID: abortedID),
+            "Explicitly selecting a stopped session must acknowledge its red alert"
+        )
+        runtime.acknowledgeAlert(approvalAgent)
+        precondition(
+            waitForAbsent(probe: probe, sessionID: approvalID),
+            "Explicitly selecting an approval session must acknowledge its yellow alert"
+        )
+
+        // A discovery refresh can advance a transcript's mtime without changing
+        // the underlying alert. That must not revive an acknowledged signal.
+        Thread.sleep(forTimeInterval: 0.05)
+        try writeTranscript(
+            url: approvalURL,
+            id: approvalID,
+            recordType: "response_item",
+            payload: [
+                "type": "custom_tool_call",
+                "name": "request_user_input",
+            ]
+        )
+        Thread.sleep(forTimeInterval: 1.25)
         (agents, integrations) = probe.snapshot()
         precondition(
             !agents.contains(where: { $0.sessionID == abortedID }),
             "Explicitly selecting a stopped session must acknowledge its red alert"
+        )
+        precondition(
+            !agents.contains(where: { $0.sessionID == approvalID }),
+            "Refreshing the same approval event must not resurrect its yellow alert"
         )
         runtime.stop()
 
@@ -232,6 +269,21 @@ enum AgentRuntimeSmoke {
         let deadline = Date.now.addingTimeInterval(timeout)
         while Date.now < deadline {
             if probe.snapshot().0.contains(where: { $0.sessionID == sessionID && $0.state == state }) {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.025)
+        }
+        return false
+    }
+
+    private static func waitForAbsent(
+        probe: RuntimeProbe,
+        sessionID: String,
+        timeout: TimeInterval = 2
+    ) -> Bool {
+        let deadline = Date.now.addingTimeInterval(timeout)
+        while Date.now < deadline {
+            if !probe.snapshot().0.contains(where: { $0.sessionID == sessionID }) {
                 return true
             }
             Thread.sleep(forTimeInterval: 0.025)
@@ -468,7 +520,7 @@ enum AgentRuntimeSmoke {
         return result
     }
 
-    private static func testTerminalAcknowledgements() {
+    private static func testAgentAlertAcknowledgements() {
         let finishedAt = Date(timeIntervalSince1970: 1_800_000_000)
         var finished = AgentSession(
             id: "codex:finished",
@@ -483,20 +535,53 @@ enum AgentRuntimeSmoke {
             updatedAt: finishedAt,
             message: nil
         )
-        var acknowledgements = TerminalAcknowledgements()
+        var acknowledgements = AgentAlertAcknowledgements()
         precondition(acknowledgements.shouldDisplay(finished), "Unacknowledged success must stay visible")
         precondition(acknowledgements.acknowledge([finished], at: finishedAt.addingTimeInterval(1)))
         precondition(!acknowledgements.shouldDisplay(finished), "Acknowledged success must clear")
+        finished.updatedAt = finishedAt.addingTimeInterval(20)
+        precondition(
+            !acknowledgements.shouldDisplay(finished),
+            "Refreshing the same completion must not resurrect green"
+        )
 
         let suiteName = "sidepulse.runtime-smoke.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         acknowledgements.save(to: defaults)
-        let restored = TerminalAcknowledgements.load(from: defaults)
+        let restored = AgentAlertAcknowledgements.load(from: defaults)
         defaults.removePersistentDomain(forName: suiteName)
         precondition(!restored.shouldDisplay(finished), "Acknowledgements must survive an app relaunch")
 
+        struct LegacyAcknowledgements: Codable {
+            var acknowledgedAt: [String: Date]
+        }
+        let legacySuiteName = "sidepulse.runtime-smoke.legacy.\(UUID().uuidString)"
+        let legacyDefaults = UserDefaults(suiteName: legacySuiteName)!
+        let legacyData = try! JSONEncoder().encode(LegacyAcknowledgements(
+            acknowledgedAt: [finished.id: finishedAt.addingTimeInterval(1)]
+        ))
+        legacyDefaults.set(legacyData, forKey: "sidepulse.completion-acknowledgements.v1")
+        var migrated = AgentAlertAcknowledgements.load(from: legacyDefaults)
+        var legacyFinished = finished
+        legacyFinished.updatedAt = finishedAt
+        precondition(
+            migrated.reconcile(with: [legacyFinished]),
+            "Build 38 acknowledgement must bind to its first observed state"
+        )
+        precondition(
+            !migrated.shouldDisplay(legacyFinished),
+            "Date-only acknowledgements from build 38 must survive migration"
+        )
+        legacyFinished.updatedAt = finishedAt.addingTimeInterval(20)
+        precondition(
+            !migrated.shouldDisplay(legacyFinished),
+            "A migrated acknowledgement must ignore an mtime-only refresh"
+        )
+        legacyDefaults.removePersistentDomain(forName: legacySuiteName)
+
         finished.state = .working
         finished.updatedAt = finishedAt.addingTimeInterval(2)
+        precondition(acknowledgements.reconcile(with: [finished]))
         precondition(acknowledgements.shouldDisplay(finished), "A new run must override the previous acknowledgement")
         finished.state = .completed
         finished.updatedAt = finishedAt.addingTimeInterval(3)
@@ -518,15 +603,21 @@ enum AgentRuntimeSmoke {
         precondition(acknowledgements.shouldDisplay(stopped), "Unacknowledged stop must stay red")
         precondition(acknowledgements.acknowledge([stopped], at: finishedAt.addingTimeInterval(1)))
         precondition(!acknowledgements.shouldDisplay(stopped), "Acknowledged stop must clear")
+        stopped.updatedAt = finishedAt.addingTimeInterval(20)
+        precondition(
+            !acknowledgements.shouldDisplay(stopped),
+            "Refreshing the same failure must not resurrect red"
+        )
 
         stopped.state = .working
         stopped.updatedAt = finishedAt.addingTimeInterval(2)
+        precondition(acknowledgements.reconcile(with: [stopped]))
         precondition(acknowledgements.shouldDisplay(stopped), "A resumed run must override the stop acknowledgement")
         stopped.state = .error
         stopped.updatedAt = finishedAt.addingTimeInterval(3)
         precondition(acknowledgements.shouldDisplay(stopped), "A later stop must become red again")
 
-        let waiting = AgentSession(
+        var waiting = AgentSession(
             id: "codex:waiting",
             provider: .codex,
             sessionID: "waiting",
@@ -539,10 +630,23 @@ enum AgentRuntimeSmoke {
             updatedAt: finishedAt,
             message: nil
         )
-        precondition(!acknowledgements.acknowledge([waiting]), "Active states must not be acknowledged away")
-        precondition(acknowledgements.shouldDisplay(waiting), "Needs-approval sessions must stay visible")
+        precondition(acknowledgements.acknowledge([waiting]), "Needs-approval sessions must be acknowledgeable")
+        precondition(!acknowledgements.shouldDisplay(waiting), "Acknowledged approval must clear")
+        waiting.updatedAt = finishedAt.addingTimeInterval(20)
+        precondition(
+            !acknowledgements.shouldDisplay(waiting),
+            "Refreshing the same approval must not resurrect yellow"
+        )
+        waiting.state = .working
+        precondition(acknowledgements.reconcile(with: [waiting]))
+        waiting.state = .waiting
+        waiting.updatedAt = finishedAt.addingTimeInterval(21)
+        precondition(
+            acknowledgements.shouldDisplay(waiting),
+            "A new approval after resumed work must become yellow again"
+        )
 
-        let activeError = AgentSession(
+        var activeError = AgentSession(
             id: "grok:active-error",
             provider: .grok,
             sessionID: "active-error",
@@ -555,14 +659,34 @@ enum AgentRuntimeSmoke {
             updatedAt: finishedAt,
             message: nil
         )
+        precondition(acknowledgements.acknowledge([activeError]), "Provider errors must be acknowledgeable")
+        precondition(!acknowledgements.shouldDisplay(activeError), "Acknowledged provider error must clear")
+        activeError.state = .working
+        precondition(acknowledgements.reconcile(with: [activeError]))
+        activeError.state = .error
+        activeError.updatedAt = finishedAt.addingTimeInterval(1)
+        precondition(acknowledgements.shouldDisplay(activeError), "A later provider error must become red again")
+
+        let bootstrapSuiteName = "sidepulse.runtime-smoke.bootstrap.\(UUID().uuidString)"
+        let bootstrapDefaults = UserDefaults(suiteName: bootstrapSuiteName)!
+        var bootstrap = AgentAlertAcknowledgements()
         precondition(
-            !acknowledgements.acknowledge([activeError]),
-            "A nonterminal provider error must not be acknowledged away"
+            bootstrap.acknowledgeExistingIfNeeded(
+                [finished, waiting, activeError],
+                defaults: bootstrapDefaults
+            ),
+            "First-run migration must acknowledge existing completed work"
+        )
+        precondition(!bootstrap.shouldDisplay(finished))
+        precondition(
+            bootstrap.shouldDisplay(waiting),
+            "First-run migration must not silently dismiss an approval"
         )
         precondition(
-            acknowledgements.shouldDisplay(activeError),
-            "A nonterminal provider error must stay visible"
+            bootstrap.shouldDisplay(activeError),
+            "First-run migration must not silently dismiss a failure"
         )
+        bootstrapDefaults.removePersistentDomain(forName: bootstrapSuiteName)
     }
 
     private static func testCodexIPCApprovalSignal() throws {

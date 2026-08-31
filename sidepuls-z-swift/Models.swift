@@ -229,9 +229,13 @@ struct AgentSession: Identifiable, Codable, Hashable, Sendable {
         return provider.title
     }
 
-    var isAcknowledgableTerminalAlert: Bool {
-        state == .completed
-            || (provider == .codex && state == .error && eventName == "CodexTurnAborted")
+    var isAcknowledgableAlert: Bool {
+        switch state {
+        case .completed, .waiting, .error:
+            true
+        case .idle, .working, .toolRunning:
+            false
+        }
     }
 }
 
