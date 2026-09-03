@@ -186,10 +186,10 @@ struct SidePulseMenuBarView: View {
                 } label: {
                     Image(systemName: store.flashlightEnabled ? "flashlight.on.fill" : "flashlight.off.fill")
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(store.flashlightEnabled ? Color.yellow : Color.secondary)
+                        .foregroundStyle(store.flashlightEnabled ? Color.white : Color.secondary)
                         .frame(width: 24, height: 24)
                         .background(
-                            (store.flashlightEnabled ? Color.yellow : Color.secondary)
+                            (store.flashlightEnabled ? Color.white : Color.secondary)
                                 .opacity(0.12),
                             in: .circle
                         )
@@ -203,10 +203,10 @@ struct SidePulseMenuBarView: View {
                 } label: {
                     Image(systemName: "power")
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(store.outputPowerIsOn ? Color.green : Color.secondary)
+                        .foregroundStyle(store.outputPowerIsOn ? Color.red : Color.secondary)
                         .frame(width: 24, height: 24)
                         .background(
-                            (store.outputPowerIsOn ? Color.green : Color.secondary)
+                            (store.outputPowerIsOn ? Color.red : Color.secondary)
                                 .opacity(0.12),
                             in: .circle
                         )

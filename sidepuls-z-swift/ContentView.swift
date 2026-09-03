@@ -60,28 +60,37 @@ struct ContentView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        ToolbarItemGroup {
-            Button {
-                store.toggleFlashlight()
-            } label: {
-                Image(systemName: store.flashlightEnabled ? "flashlight.on.fill" : "flashlight.off.fill")
-                    .foregroundStyle(store.flashlightEnabled ? Color.yellow : Color.secondary)
-            }
-            .buttonStyle(.glass)
-            .help(store.flashlightEnabled ? "Turn off Flashlight" : "Turn on Flashlight")
-            .accessibilityLabel("Flashlight")
-            .accessibilityValue(store.flashlightEnabled ? "On" : "Off")
+        ToolbarItem {
+            HStack(spacing: 8) {
+                Button {
+                    store.toggleFlashlight()
+                } label: {
+                    Image(systemName: store.flashlightEnabled ? "flashlight.on.fill" : "flashlight.off.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(store.flashlightEnabled ? Color.white : Color.secondary)
+                        .frame(width: 18, height: 18)
+                        .padding(5)
+                }
+                .buttonStyle(.glass)
+                .help(store.flashlightEnabled ? "Turn off Flashlight" : "Turn on Flashlight")
+                .accessibilityLabel("Flashlight")
+                .accessibilityValue(store.flashlightEnabled ? "On" : "Off")
 
-            Button {
-                store.toggleOutputPower()
-            } label: {
-                Image(systemName: "power")
-                    .foregroundStyle(store.outputPowerIsOn ? Color.green : Color.secondary)
+                Button {
+                    store.toggleOutputPower()
+                } label: {
+                    Image(systemName: "power")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(store.outputPowerIsOn ? Color.red : Color.secondary)
+                        .frame(width: 18, height: 18)
+                        .padding(5)
+                }
+                .buttonStyle(.glass)
+                .help(store.outputPowerIsOn ? "Turn off Live Output" : "Turn on Live Output")
+                .accessibilityLabel("Live Output")
+                .accessibilityValue(store.outputPowerIsOn ? "On" : "Off")
             }
-            .buttonStyle(.glass)
-            .help(store.outputPowerIsOn ? "Turn off Live Output" : "Turn on Live Output")
-            .accessibilityLabel("Live Output")
-            .accessibilityValue(store.outputPowerIsOn ? "On" : "Off")
+            .padding(.horizontal, 4)
         }
     }
 }
