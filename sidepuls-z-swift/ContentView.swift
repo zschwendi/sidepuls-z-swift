@@ -62,6 +62,17 @@ struct ContentView: View {
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup {
             Button {
+                store.toggleFlashlight()
+            } label: {
+                Image(systemName: store.flashlightEnabled ? "flashlight.on.fill" : "flashlight.off.fill")
+                    .foregroundStyle(store.flashlightEnabled ? Color.yellow : Color.secondary)
+            }
+            .buttonStyle(.glass)
+            .help(store.flashlightEnabled ? "Turn off Flashlight" : "Turn on Flashlight")
+            .accessibilityLabel("Flashlight")
+            .accessibilityValue(store.flashlightEnabled ? "On" : "Off")
+
+            Button {
                 store.toggleOutputPower()
             } label: {
                 Image(systemName: "power")
@@ -299,6 +310,32 @@ struct SignalModeControl: View {
                 .controlSize(.small)
                 .accessibilityLabel("Max Brightness")
                 .accessibilityValue("\(Int((store.universalBrightness * 100).rounded())) percent")
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 8) {
+                    Label("Flashlight behavior", systemImage: "flashlight.on.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Picker("Flashlight Behavior", selection: Binding(
+                        get: { store.flashlightMode },
+                        set: { store.selectFlashlightMode($0) }
+                    )) {
+                        ForEach(FlashlightMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
+
+                Text(store.flashlightMode.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Divider()

@@ -130,6 +130,29 @@ enum AgentDisplayMode: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum FlashlightMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case overrideEverything
+    case behindAnimations
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .overrideEverything: "Override Everything"
+        case .behindAnimations: "Behind Animations"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .overrideEverything:
+            "Hold every LED at pure white and full hardware brightness."
+        case .behindAnimations:
+            "Keep inactive LEDs white while agent colors and motion continue above them."
+        }
+    }
+}
+
 enum MenuBarIconStyle: String, Codable, CaseIterable, Identifiable, Sendable {
     case horizontalEight
     case horizontalFour
@@ -800,6 +823,8 @@ struct BatteryIndicatorSettings: Codable, Equatable, Sendable {
 struct SidePulseOutputCalibration: Codable, Equatable, Sendable {
     var brightnessScale: Double
     var blueScale: Double
+
+    static let flashlight = SidePulseOutputCalibration(brightnessScale: 1, blueScale: 1)
 
     var normalized: SidePulseOutputCalibration {
         SidePulseOutputCalibration(

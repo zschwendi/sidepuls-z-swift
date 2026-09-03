@@ -73,6 +73,137 @@ enum LEDProgramOutputCalibration {
     }
 }
 
+enum FlashlightLighting {
+    static let fullWhiteProgram = "brightness 255\n#FFFFFF"
+    private static let maximumProgramBytes = 512
+    private static let maximumProgramLines = 20
+
+    static func applying(
+        to program: String,
+        mode: FlashlightMode,
+        ledCount: Int = 8
+    ) -> String {
+        switch mode {
+        case .overrideEverything:
+            return fullWhiteProgram
+        case .behindAnimations:
+            let source = program.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "off"
+                : program
+            var lines = source
+                .components(separatedBy: "\n")
+                .map { replacingOffSegmentsWithWhite($0) }
+            if let firstStepIndex = lines.firstIndex(where: { isLightingStep($0) }) {
+                lines[firstStepIndex] = replacingBlackBaseColorsWithWhite(
+                    lines[firstStepIndex]
+                )
+                if !hasFullInitialCoverage(lines[firstStepIndex], ledCount: ledCount) {
+                    lines.insert("#FFFFFF", at: firstStepIndex)
+                }
+            } else {
+                let repeatIndex = lines.firstIndex(where: { isRepeat($0) }) ?? lines.endIndex
+                lines.insert("#FFFFFF", at: repeatIndex)
+            }
+            let result = LEDProgramOutputCalibration.settingBrightness(
+                in: lines.joined(separator: "\n"),
+                to: 255
+            )
+            guard result.utf8.count <= maximumProgramBytes,
+                  result.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count
+                    <= maximumProgramLines
+            else { return fullWhiteProgram }
+            return result
+        }
+    }
+
+    private static func replacingOffSegmentsWithWhite(_ line: String) -> String {
+        line.split(separator: ";", omittingEmptySubsequences: false)
+            .map { rawSegment in
+                let segment = String(rawSegment)
+                let leadingWhitespace = segment.prefix(while: \.isWhitespace)
+                let body = segment.dropFirst(leadingWhitespace.count)
+                guard body == "off" || body.hasPrefix("off ") else { return segment }
+                return String(leadingWhitespace) + "#FFFFFF" + String(body.dropFirst("off".count))
+            }
+            .joined(separator: ";")
+    }
+
+    /// Black in an untimed base frame is physically the same as an off LED, so
+    /// the flashlight underlay replaces it with white. Timed black animation
+    /// targets remain untouched.
+    private static func replacingBlackBaseColorsWithWhite(_ line: String) -> String {
+        let segments = line.split(separator: ";", omittingEmptySubsequences: false)
+        if segments.count == 1 {
+            let tokens = line.split(whereSeparator: \.isWhitespace)
+            guard !tokens.isEmpty, tokens.allSatisfy({ isHexColor($0) }) else { return line }
+            return tokens.map { $0 == "#000000" ? "#FFFFFF" : String($0) }
+                .joined(separator: " ")
+        }
+
+        guard segments.count > 1,
+              segments.allSatisfy({ segment in
+                  let tokens = segment.split(whereSeparator: \.isWhitespace)
+                  guard tokens.count == 1, let token = tokens.first,
+                        let colon = token.firstIndex(of: ":")
+                  else { return false }
+                  let colorStart = token.index(after: colon)
+                  return Int(token[..<colon]) != nil
+                      && colorStart < token.endIndex
+                      && token[colorStart] == "#"
+              })
+        else { return line }
+
+        return segments.map { rawSegment in
+            let segment = String(rawSegment)
+            guard segment.hasSuffix(":#000000") else { return segment }
+            return String(segment.dropLast("#000000".count)) + "#FFFFFF"
+        }
+        .joined(separator: ";")
+    }
+
+    private static func isHexColor(_ token: Substring) -> Bool {
+        guard token.count == 7, token.first == "#" else { return false }
+        return token.dropFirst().allSatisfy(\.isHexDigit)
+    }
+
+    private static func isLightingStep(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return !trimmed.isEmpty
+            && !trimmed.hasPrefix("brightness ")
+            && !trimmed.hasPrefix("//")
+            && !trimmed.hasPrefix(";")
+            && !trimmed.hasPrefix("# ")
+            && !isRepeat(trimmed)
+    }
+
+    private static func isRepeat(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed == "repeat" || trimmed.hasPrefix("repeat ")
+    }
+
+    private static func hasFullInitialCoverage(_ line: String, ledCount: Int) -> Bool {
+        let count = max(1, min(8, ledCount))
+        let segments = line.split(separator: ";", omittingEmptySubsequences: true)
+        guard !segments.isEmpty else { return false }
+        if segments.count == 1 {
+            let tokens = segments[0].split(whereSeparator: \.isWhitespace)
+            guard let first = tokens.first else { return false }
+            if first.hasPrefix("#") {
+                let colorCount = tokens.prefix(while: { $0.hasPrefix("#") }).count
+                return colorCount == 1 || colorCount >= count
+            }
+        }
+
+        let coveredIndices = Set(segments.compactMap { segment -> Int? in
+            guard let token = segment.split(whereSeparator: \.isWhitespace).first,
+                  let colon = token.firstIndex(of: ":")
+            else { return nil }
+            return Int(token[..<colon])
+        })
+        return (0..<count).allSatisfy(coveredIndices.contains)
+    }
+}
+
 struct AdaptiveOccupancyAllocator: Sendable {
     private(set) var residentOrder: [String] = []
 

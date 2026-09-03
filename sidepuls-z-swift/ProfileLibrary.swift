@@ -167,6 +167,7 @@ enum AppPreferences {
     private static let agentDisplayModeKey = "sidepulse.agent-display-mode.v1"
     private static let menuBarIconStyleKey = "sidepulse.menu-bar-icon-style.v1"
     private static let universalBrightnessKey = "sidepulse.universal-brightness.v1"
+    private static let flashlightModeKey = "sidepulse.flashlight-mode.v1"
     private static let nearbyMirroringModeKey = "sidepulse.nearby-mirroring-mode.v1"
     private static let selectedNearbyPeerKey = "sidepulse.selected-nearby-peer.v1"
     private static let nearbySharingEnabledKey = "sidepulse.nearby-sharing-enabled.v2"
@@ -243,6 +244,20 @@ enum AppPreferences {
         to defaults: UserDefaults = .standard
     ) {
         defaults.set(max(0, min(1, brightness)), forKey: universalBrightnessKey)
+    }
+
+    static func flashlightMode(from defaults: UserDefaults = .standard) -> FlashlightMode {
+        guard let rawValue = defaults.string(forKey: flashlightModeKey),
+              let mode = FlashlightMode(rawValue: rawValue)
+        else { return .overrideEverything }
+        return mode
+    }
+
+    static func saveFlashlightMode(
+        _ mode: FlashlightMode,
+        to defaults: UserDefaults = .standard
+    ) {
+        defaults.set(mode.rawValue, forKey: flashlightModeKey)
     }
 
     static func nearbyMirroringMode(

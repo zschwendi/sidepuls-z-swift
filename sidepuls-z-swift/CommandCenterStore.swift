@@ -68,6 +68,8 @@ final class CommandCenterStore {
     var agentDisplayMode = AppPreferences.agentDisplayMode()
     var menuBarIconStyle = AppPreferences.menuBarIconStyle()
     var universalBrightness = AppPreferences.universalBrightness()
+    var flashlightMode = AppPreferences.flashlightMode()
+    var flashlightEnabled = false
     var ejectPreventionEnabled = AppPreferences.ejectPreventionEnabled()
     var ejectPreventionManagedExternally = false
     var ejectPreventionMessage = "Checking eject prevention…"
@@ -207,7 +209,14 @@ final class CommandCenterStore {
         let routedScene = device.ledCount == SidePulseDeviceKind.dot.ledCount
             ? routedDotScene
             : routedProScene
-        let program = device.connected ? device.sourceProgram : routedScene.program
+        let underlyingProgram = device.connected ? device.sourceProgram : routedScene.program
+        let program = flashlightEnabled
+            ? FlashlightLighting.applying(
+                to: underlyingProgram,
+                mode: flashlightMode,
+                ledCount: device.ledCount
+            )
+            : underlyingProgram
         return LEDProgramOutputCalibration.settingBrightness(in: program, to: 255)
     }
 
@@ -380,6 +389,27 @@ final class CommandCenterStore {
         syncHardwareOutput()
     }
 
+    func selectFlashlightMode(_ mode: FlashlightMode) {
+        guard flashlightMode != mode else { return }
+        flashlightMode = mode
+        AppPreferences.saveFlashlightMode(mode)
+        if flashlightEnabled {
+            syncHardwareOutput(interruptsPreview: true)
+            notifySoftwareDisplayChanged()
+        }
+    }
+
+    func setFlashlightEnabled(_ enabled: Bool) {
+        guard flashlightEnabled != enabled else { return }
+        flashlightEnabled = enabled
+        syncHardwareOutput(interruptsPreview: true)
+        notifySoftwareDisplayChanged()
+    }
+
+    func toggleFlashlight() {
+        setFlashlightEnabled(!flashlightEnabled)
+    }
+
     var ejectPreventionIsOn: Bool {
         ejectPreventionManagedExternally || ejectGuard.isRunning
     }
@@ -396,6 +426,10 @@ final class CommandCenterStore {
     }
 
     var outputPowerIsOn: Bool {
+        flashlightEnabled || standardOutputPowerIsOn
+    }
+
+    private var standardOutputPowerIsOn: Bool {
         liveOutputEnabled && universalBrightness > 0.000_1
     }
 
@@ -411,8 +445,15 @@ final class CommandCenterStore {
             } else if restoresDefaultBrightness {
                 syncHardwareOutput()
             }
-        } else if liveOutputEnabled {
-            liveOutputEnabled = false
+        } else {
+            let flashlightWasEnabled = flashlightEnabled
+            flashlightEnabled = false
+            if liveOutputEnabled {
+                liveOutputEnabled = false
+            } else if flashlightWasEnabled {
+                syncHardwareOutput(interruptsPreview: true)
+            }
+            if flashlightWasEnabled { notifySoftwareDisplayChanged() }
         }
     }
 
@@ -852,6 +893,7 @@ final class CommandCenterStore {
     }
 
     func previewSelectedState() {
+        guard !flashlightEnabled || flashlightMode != .overrideEverything else { return }
         let previewAgent = AgentSession(
             id: "sidepulse:preview",
             provider: .unknown,
@@ -879,15 +921,28 @@ final class CommandCenterStore {
             allocator: &dotPreviewAllocator,
             ledCount: SidePulseDeviceKind.dot.ledCount
         )
+        let usesFlashlight = flashlightEnabled
         proHardware?.preview(
-            program: proPreview.program,
-            brightnessScale: universalBrightness,
-            outputCalibration: proOutputCalibration
+            program: usesFlashlight
+                ? FlashlightLighting.applying(
+                    to: proPreview.program,
+                    mode: flashlightMode,
+                    ledCount: SidePulseDeviceKind.pro.ledCount
+                )
+                : proPreview.program,
+            brightnessScale: usesFlashlight ? 1 : universalBrightness,
+            outputCalibration: usesFlashlight ? .flashlight : proOutputCalibration
         )
         dotHardware?.preview(
-            program: dotPreview.program,
-            brightnessScale: universalBrightness,
-            outputCalibration: dotOutputCalibration
+            program: usesFlashlight
+                ? FlashlightLighting.applying(
+                    to: dotPreview.program,
+                    mode: flashlightMode,
+                    ledCount: SidePulseDeviceKind.dot.ledCount
+                )
+                : dotPreview.program,
+            brightnessScale: usesFlashlight ? 1 : universalBrightness,
+            outputCalibration: usesFlashlight ? .flashlight : dotOutputCalibration
         )
     }
 
@@ -908,6 +963,7 @@ final class CommandCenterStore {
 
     func previewBatteryIndicator() {
         guard batterySettings.showsChargeInfo else { return }
+        guard !flashlightEnabled || flashlightMode != .overrideEverything else { return }
         let chargeFraction = batteryState?.chargeFraction ?? 1
         let proTransition = batteryIndicatorScene(
             chargeFraction: chargeFraction,
@@ -917,16 +973,29 @@ final class CommandCenterStore {
             chargeFraction: chargeFraction,
             ledCount: SidePulseDeviceKind.dot.ledCount
         )
+        let usesFlashlight = flashlightEnabled
         proHardware?.preview(
-            program: proTransition.program,
-            brightnessScale: universalBrightness,
-            outputCalibration: proOutputCalibration,
+            program: usesFlashlight
+                ? FlashlightLighting.applying(
+                    to: proTransition.program,
+                    mode: flashlightMode,
+                    ledCount: SidePulseDeviceKind.pro.ledCount
+                )
+                : proTransition.program,
+            brightnessScale: usesFlashlight ? 1 : universalBrightness,
+            outputCalibration: usesFlashlight ? .flashlight : proOutputCalibration,
             duration: proTransition.duration
         )
         dotHardware?.preview(
-            program: dotTransition.program,
-            brightnessScale: universalBrightness,
-            outputCalibration: dotOutputCalibration,
+            program: usesFlashlight
+                ? FlashlightLighting.applying(
+                    to: dotTransition.program,
+                    mode: flashlightMode,
+                    ledCount: SidePulseDeviceKind.dot.ledCount
+                )
+                : dotTransition.program,
+            brightnessScale: usesFlashlight ? 1 : universalBrightness,
+            outputCalibration: usesFlashlight ? .flashlight : dotOutputCalibration,
             duration: dotTransition.duration
         )
     }
@@ -1156,28 +1225,51 @@ final class CommandCenterStore {
         )
     }
 
-    private func syncHardwareOutput() {
+    private func syncHardwareOutput(interruptsPreview: Bool = false) {
         let currentProStates = Dictionary(uniqueKeysWithValues: routedProScene.placementsTopToBottom.map {
             ($0.agent.id, $0.agent.state)
         })
         let currentDotStates = Dictionary(uniqueKeysWithValues: routedDotScene.placementsTopToBottom.map {
             ($0.agent.id, $0.agent.state)
         })
-        let proTiming = hardwareTiming(from: lastProOutputStates, to: currentProStates)
-        let dotTiming = hardwareTiming(from: lastDotOutputStates, to: currentDotStates)
+        let proTiming = flashlightEnabled
+            ? HardwareUpdateTiming.immediate
+            : hardwareTiming(from: lastProOutputStates, to: currentProStates)
+        let dotTiming = flashlightEnabled
+            ? HardwareUpdateTiming.immediate
+            : hardwareTiming(from: lastDotOutputStates, to: currentDotStates)
+        let proProgram = flashlightEnabled
+            ? FlashlightLighting.applying(
+                to: routedProScene.program,
+                mode: flashlightMode,
+                ledCount: SidePulseDeviceKind.pro.ledCount
+            )
+            : routedProScene.program
+        let dotProgram = flashlightEnabled
+            ? FlashlightLighting.applying(
+                to: routedDotScene.program,
+                mode: flashlightMode,
+                ledCount: SidePulseDeviceKind.dot.ledCount
+            )
+            : routedDotScene.program
+        let brightnessScale = flashlightEnabled ? 1 : universalBrightness
+        let proCalibration = flashlightEnabled ? SidePulseOutputCalibration.flashlight : proOutputCalibration
+        let dotCalibration = flashlightEnabled ? SidePulseOutputCalibration.flashlight : dotOutputCalibration
         proHardware?.update(
             enabled: outputPowerIsOn,
-            program: routedProScene.program,
-            brightnessScale: universalBrightness,
-            outputCalibration: proOutputCalibration,
-            timing: proTiming
+            program: proProgram,
+            brightnessScale: brightnessScale,
+            outputCalibration: proCalibration,
+            timing: proTiming,
+            interruptsPreview: interruptsPreview
         )
         dotHardware?.update(
             enabled: outputPowerIsOn,
-            program: routedDotScene.program,
-            brightnessScale: universalBrightness,
-            outputCalibration: dotOutputCalibration,
-            timing: dotHardwareTiming(from: dotTiming)
+            program: dotProgram,
+            brightnessScale: brightnessScale,
+            outputCalibration: dotCalibration,
+            timing: flashlightEnabled ? .immediate : dotHardwareTiming(from: dotTiming),
+            interruptsPreview: interruptsPreview
         )
         lastProOutputStates = currentProStates
         lastDotOutputStates = currentDotStates

@@ -182,6 +182,23 @@ struct SidePulseMenuBarView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button {
+                    store.toggleFlashlight()
+                } label: {
+                    Image(systemName: store.flashlightEnabled ? "flashlight.on.fill" : "flashlight.off.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(store.flashlightEnabled ? Color.yellow : Color.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            (store.flashlightEnabled ? Color.yellow : Color.secondary)
+                                .opacity(0.12),
+                            in: .circle
+                        )
+                }
+                .buttonStyle(.plain)
+                .help(store.flashlightEnabled ? "Turn off Flashlight" : "Turn on Flashlight")
+                .accessibilityLabel("Flashlight")
+                .accessibilityValue(store.flashlightEnabled ? "On" : "Off")
+                Button {
                     store.toggleOutputPower()
                 } label: {
                     Image(systemName: "power")

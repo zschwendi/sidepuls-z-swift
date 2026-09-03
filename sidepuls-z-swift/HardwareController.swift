@@ -70,7 +70,8 @@ final class SidePulseHardwareController: @unchecked Sendable {
         program: String,
         brightnessScale: Double = 1,
         outputCalibration: SidePulseOutputCalibration? = nil,
-        timing: HardwareUpdateTiming = .immediate
+        timing: HardwareUpdateTiming = .immediate,
+        interruptsPreview: Bool = false
     ) {
         queue.async { [weak self] in
             guard let self else { return }
@@ -85,10 +86,15 @@ final class SidePulseHardwareController: @unchecked Sendable {
             let wasEnabled = outputEnabled
             let enabledChanged = enabled != outputEnabled
             let programChanged = calibratedProgram != requestedProgram
-            guard enabledChanged || programChanged else { return }
+            let shouldInterruptPreview = interruptsPreview && activePreviewGeneration != nil
+            guard enabledChanged || programChanged || shouldInterruptPreview else { return }
             outputEnabled = enabled
             requestedProgram = calibratedProgram
             requestedSourceProgram = program
+            if shouldInterruptPreview {
+                cancelPreviewLocked()
+                cancelDeferredWriteLocked()
+            }
             if !enabled {
                 cancelPreviewLocked()
                 cancelDeferredWriteLocked()
@@ -115,7 +121,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
 
             switch timing {
             case .immediate:
-                let wasPreviewActive = activePreviewGeneration != nil
+                let wasPreviewActive = shouldInterruptPreview || activePreviewGeneration != nil
                 cancelPreviewLocked()
                 cancelDeferredWriteLocked()
                 tryWriteRequestedLocked(force: wasPreviewActive)
