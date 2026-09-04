@@ -17,6 +17,10 @@ SidePulse Z is a native macOS app for seeing what your AI coding agents are doin
 - Opens an agent directly from the menu bar or Agent Hub.
 - Includes custom colors, animations, brightness, SidePulse Pro RGB color balance, battery indicators, profiles, and Focus automation.
 - Adds a full-brightness white flashlight that can override lighting or sit behind agent animations.
+- Puts Microphone, Timer, and optional SidePulse Notch controls beside Flashlight in the main toolbar and menu-bar popover.
+- Shows microphone activity without recording audio, with hardware-mute status when the device exposes it. App-specific software mute is not a reliable system signal.
+- Includes a customizable countdown with pause/resume, a warning color, and a finished signal. Its countdown stays visible while running and catches up after system sleep.
+- Adds Progress in Lighting Studio: run a command or watch an existing process, with customizable running, finished, and failed signals.
 - Drives SidePulse Pro and SidePulse Dot as standalone outputs; neither device requires the other.
 - Keeps SidePulse Pro mounted through software eject attempts after lock or hibernate.
 - Lets each SidePulse use this Mac, one nearby Mac, or all discovered Macs over Bonjour.
@@ -42,7 +46,34 @@ Run the smoke tests with:
 
 The repository currently ships as source rather than a notarized macOS download.
 
-## Project
+## Utility modes
+
+Open **Settings → Modes** to customize microphone and timer colors, colorways,
+motion, intensity, and speed. The notch has its own brightness control and is
+disabled by default; its colors mirror the selected lighting. Selecting a mode
+uses it for the LEDs without changing your agent profiles. **Agent lighting**
+returns to your existing setup. Timers keep counting if you select another mode.
+
+Open **Lighting Studio → Progress** to run a command in a chosen folder or watch
+a process by its PID. Running a command records its exit status. Watching an
+existing process only observes when it exits, so its success or failure is
+unknown. Stopping that watcher does not stop the watched process.
+
+Tasks with no reported percentage show an ongoing animation. A command can
+report real percentage updates by printing whole-number lines to standard output:
+
+```text
+SIDEPULSE_PROGRESS=25
+SIDEPULSE_PROGRESS=100
+```
+
+The finished or failed signal remains until cleared. **Open Log** opens the
+bounded local output log for a command. Progress only runs commands explicitly
+started with **Run & Watch**; app launch never reruns a saved command.
+Quitting SidePulse cancels commands it started. Processes you only watch are
+left running.
+
+## Project links
 
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)

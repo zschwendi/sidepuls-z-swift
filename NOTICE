@@ -12,5 +12,10 @@ copyright notice:
 
 Copyright (c) 2026 Peter Kuhar
 
+The native SidePulse Notch display adapts the geometry and LED blending from
+src/sidepulse/virtual_device.py at upstream commit
+1249a264f121d2a7b7a7d968d370c05d57f6c459. It uses SidePulse Z's existing native
+LED renderer and saved lighting configuration.
+
 SidePulse Z is an independent community project. It is not affiliated with or
 endorsed by Peter Kuhar or InteliWEAR LLC.

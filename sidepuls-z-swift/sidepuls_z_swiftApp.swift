@@ -28,6 +28,7 @@ private final class SidePulseMenuBarController: NSObject {
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private let iconView = MenuBarDotAnimationView()
+    private let notchDisplay = NotchDisplayController()
     private var displayLink: CADisplayLink?
     private var renderedProgramText = ""
     private var renderedLEDCount = 0
@@ -115,6 +116,13 @@ private final class SidePulseMenuBarController: NSObject {
     }
 
     private func refreshIconSource() {
+        notchDisplay.update(
+            enabled: store.notchEnabled,
+            program: store.softwareDisplayProgram,
+            ledCount: store.device.ledCount,
+            clockOrigin: store.softwareDisplayClockOrigin,
+            brightness: store.notchBrightness
+        )
         guard let button = statusItem.button else { return }
         let program = store.softwareDisplayProgram
         let ledCount = store.device.ledCount
@@ -181,40 +189,16 @@ struct SidePulseMenuBarView: View {
                 Text("\(store.agents.count) session\(store.agents.count == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button {
-                    store.toggleFlashlight()
-                } label: {
-                    Image(systemName: store.flashlightEnabled ? "flashlight.on.fill" : "flashlight.off.fill")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(store.flashlightEnabled ? Color.white : Color.secondary)
-                        .frame(width: 24, height: 24)
-                        .background(
-                            (store.flashlightEnabled ? Color.white : Color.secondary)
-                                .opacity(0.12),
-                            in: .circle
-                        )
+            }
+
+            UtilityControlsView(store: store, compact: true)
+
+            if let title = store.utilityStatusTitle {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.subheadline.weight(.semibold))
+                    Text(store.utilityStatusDetail)
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                 }
-                .buttonStyle(.plain)
-                .help(store.flashlightEnabled ? "Turn off Flashlight" : "Turn on Flashlight")
-                .accessibilityLabel("Flashlight")
-                .accessibilityValue(store.flashlightEnabled ? "On" : "Off")
-                Button {
-                    store.toggleOutputPower()
-                } label: {
-                    Image(systemName: "power")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(store.outputPowerIsOn ? Color.red : Color.secondary)
-                        .frame(width: 24, height: 24)
-                        .background(
-                            (store.outputPowerIsOn ? Color.red : Color.secondary)
-                                .opacity(0.12),
-                            in: .circle
-                        )
-                }
-                .buttonStyle(.plain)
-                .help(store.outputPowerIsOn ? "Turn off Live Output" : "Turn on Live Output")
-                .accessibilityLabel("Live Output")
-                .accessibilityValue(store.outputPowerIsOn ? "On" : "Off")
             }
 
             HStack(alignment: .top, spacing: 14) {

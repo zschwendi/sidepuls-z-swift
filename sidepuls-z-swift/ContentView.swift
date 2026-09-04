@@ -61,60 +61,10 @@ struct ContentView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
-            HStack(spacing: 3) {
-                toolbarControl(
-                    symbol: store.flashlightEnabled ? "flashlight.on.fill" : "flashlight.off.fill",
-                    isOn: store.flashlightEnabled,
-                    activeColor: .white,
-                    label: "Flashlight",
-                    help: store.flashlightEnabled ? "Turn off Flashlight" : "Turn on Flashlight"
-                ) {
-                    store.toggleFlashlight()
-                }
-
-                Divider()
-                    .frame(height: 16)
-                    .opacity(0.45)
-
-                toolbarControl(
-                    symbol: "power",
-                    isOn: store.outputPowerIsOn,
-                    activeColor: .red,
-                    label: "Live Output",
-                    help: store.outputPowerIsOn ? "Turn off Live Output" : "Turn on Live Output"
-                ) {
-                    store.toggleOutputPower()
-                }
-            }
-            .padding(3)
-            .glassEffect(.regular, in: .capsule)
+            UtilityControlsView(store: store)
+                .padding(3)
+                .glassEffect(.regular, in: .capsule)
         }
-    }
-
-    private func toolbarControl(
-        symbol: String,
-        isOn: Bool,
-        activeColor: Color,
-        label: String,
-        help: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(isOn ? activeColor.opacity(0.14) : .clear)
-
-                Image(systemName: symbol)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isOn ? activeColor : Color.secondary)
-            }
-            .frame(width: 28, height: 28)
-            .contentShape(.circle)
-        }
-        .buttonStyle(.plain)
-        .help(help)
-        .accessibilityLabel(label)
-        .accessibilityValue(isOn ? "On" : "Off")
     }
 }
 
@@ -150,6 +100,7 @@ struct CommandCenterHero: View {
     }
 
     private var title: String {
+        if let title = store.utilityStatusTitle { return title }
         if !store.device.connected { return "Connect your SidePulse" }
         if !store.outputPowerIsOn { return "Turn on Live Output" }
         if activeCount == 0 { return "Start an agent" }
@@ -159,6 +110,7 @@ struct CommandCenterHero: View {
     }
 
     private var detail: String {
+        if store.utilityMode != .agents { return store.utilityStatusDetail }
         if !store.device.connected {
             return "Plug in the device. SidePulse will detect it automatically and show you the exact hardware path."
         }
@@ -182,12 +134,14 @@ struct CommandCenterHero: View {
     }
 
     private var tint: Color {
+        if store.utilityMode != .agents { return .cyan }
         if !store.device.connected || !store.outputPowerIsOn { return .orange }
         if activeCount == 0 { return .cyan }
         return .green
     }
 
     private var statusLabel: String {
+        if store.utilityMode != .agents { return store.utilityMode.title.uppercased() }
         if !store.device.connected || !store.outputPowerIsOn { return "ACTION NEEDED" }
         if activeCount == 0 { return "READY" }
         if store.agentDisplayMode == .simple, store.aggregateState == .completed { return "READY FOR YOU" }
@@ -233,7 +187,7 @@ struct CommandCenterHero: View {
 
                 HStack(spacing: 7) {
                     primaryAction
-                if activeCount > 0, store.device.connected, store.outputPowerIsOn {
+                if store.utilityMode == .agents, activeCount > 0, store.device.connected, store.outputPowerIsOn {
                     Button("Tune signal", systemImage: "paintpalette.fill") {
                         store.selectedState = store.aggregateState == .idle ? .working : store.aggregateState
                         store.selectedSection = .lighting
@@ -250,7 +204,10 @@ struct CommandCenterHero: View {
 
     @ViewBuilder
     private var primaryAction: some View {
-        if !store.device.connected {
+        if store.utilityMode != .agents {
+            Button("Agent lighting", systemImage: "cpu") { store.selectUtilityMode(.agents) }
+                .buttonStyle(.glass)
+        } else if !store.device.connected {
             Button("Open Hardware", systemImage: "externaldrive.fill") {
                 store.selectedSection = .hardware
             }
@@ -404,6 +361,34 @@ struct SignalModeControl: View {
                 .pickerStyle(.menu)
             }
 
+            VStack(alignment: .leading, spacing: 7) {
+                Toggle("SidePulse Notch", isOn: Binding(
+                    get: { store.notchEnabled },
+                    set: { store.setNotchEnabled($0) }
+                ))
+                .font(.caption)
+                .toggleStyle(.switch)
+
+                Text("Mirror your LED display beneath the camera notch, or at the top center of a display without one.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if store.notchEnabled {
+                    HStack {
+                        Text("Notch brightness").font(.caption2)
+                        Slider(value: Binding(
+                            get: { store.notchBrightness },
+                            set: { store.setNotchBrightness($0) }
+                        ), in: 0...1)
+                        .accessibilityLabel("Notch brightness")
+                        Text("\(Int((store.notchBrightness * 100).rounded()))%")
+                            .font(.caption2.monospacedDigit())
+                            .frame(width: 34, alignment: .trailing)
+                    }
+                }
+            }
+
             Toggle("Start at login", isOn: Binding(
                 get: { store.launchAtLoginEnabled },
                 set: { store.setLaunchAtLoginEnabled($0) }
@@ -470,7 +455,7 @@ struct SignalModeControl: View {
 }
 
 private enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, profiles, battery, connections, diagnostics
+    case general, profiles, battery, modes, connections, diagnostics
 
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
@@ -492,7 +477,7 @@ struct SettingsView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
-                .frame(width: 500)
+                .frame(width: 520)
             }
 
             Group {
@@ -511,6 +496,8 @@ struct SettingsView: View {
                     ProfilesView(store: store)
                 case .battery:
                     BatteryView(store: store)
+                case .modes:
+                    UtilitySettingsView(store: store)
                 case .connections:
                     ConnectionsView(store: store)
                 case .diagnostics:
@@ -518,6 +505,14 @@ struct SettingsView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .onAppear { openRequestedPane() }
+        .onChange(of: store.showsModeSettings) { _, _ in openRequestedPane() }
+    }
+    private func openRequestedPane() {
+        if store.showsModeSettings {
+            selectedPane = .modes
+            store.showsModeSettings = false
         }
     }
 }
@@ -708,7 +703,7 @@ struct LEDDeckView: View {
                         Circle()
                             .fill(store.device.connected ? Color.green : Color.secondary)
                             .frame(width: 6, height: 6)
-                        Text(store.device.connected ? "LIVE DEVICE FEED" : "DEVICE OFFLINE")
+                        Text(store.device.connected ? "LIVE DEVICE FEED" : store.utilityMode == .agents ? "DEVICE OFFLINE" : "SCREEN PREVIEW")
                     }
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
@@ -716,7 +711,7 @@ struct LEDDeckView: View {
 
                 HStack(alignment: .center, spacing: 28) {
                     DisplayLinkedLEDArray(
-                        program: store.connectedSoftwareDisplayProgram,
+                        program: store.utilityMode == .agents ? store.connectedSoftwareDisplayProgram : store.softwareDisplayProgram,
                         ledCount: store.device.ledCount,
                         clockOrigin: store.softwareDisplayClockOrigin,
                         style: .commandCenter
@@ -739,12 +734,17 @@ struct LEDDeckView: View {
                         }
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(store.agentDisplayMode == .simple
+                        Text(store.utilityMode != .agents ? "\(store.utilityMode.title.uppercased()) · FULL ARRAY" : store.agentDisplayMode == .simple
                             ? "ONE SIGNAL · FULL ARRAY"
                             : "ASSIGNED SESSIONS · TOP TO BOTTOM")
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(.secondary)
-                        if store.scene.placementsTopToBottom.isEmpty {
+                        if let title = store.utilityStatusTitle {
+                            Text(title).font(.title3.weight(.semibold))
+                            Text(store.utilityStatusDetail).font(.caption).foregroundStyle(.secondary)
+                            Button("Agent lighting", systemImage: "cpu") { store.selectUtilityMode(.agents) }
+                                .buttonStyle(.glass)
+                        } else if store.scene.placementsTopToBottom.isEmpty {
                             Label("Array off", systemImage: "moon.fill")
                                 .foregroundStyle(.secondary)
                         } else {
@@ -1057,6 +1057,7 @@ struct SignalMetric: View {
 
 struct LightingStudioView: View {
     @Bindable var store: CommandCenterStore
+    @State private var showsProgress = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
@@ -1067,17 +1068,42 @@ struct LightingStudioView: View {
                     }) { state in
                         StateStyleRow(
                             style: store.selectedProfile.style(for: state),
-                            selected: store.selectedState == state,
-                            action: { store.selectedState = state }
+                            selected: !showsProgress && store.selectedState == state,
+                            action: { showsProgress = false; store.selectedState = state }
                         )
                     }
+                    Button {
+                        showsProgress = true
+                    } label: {
+                        HStack(spacing: 13) {
+                            Image(systemName: "chart.bar.fill")
+                                .foregroundStyle(.cyan)
+                                .frame(width: 18)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Progress").fontWeight(.semibold)
+                                Text("Tell me when it’s done")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                        }
+                        .padding(14)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(showsProgress ? .regular.tint(.cyan.opacity(0.18)) : .regular, in: .rect(cornerRadius: 18))
                 }
             }
-            .frame(width: 330)
+            .frame(width: 270)
 
             ScrollView {
-                StyleInspectorView(store: store)
-                    .frame(maxWidth: .infinity)
+                if showsProgress {
+                    ProgressModeStudioView(store: store)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    StyleInspectorView(store: store)
+                        .frame(maxWidth: .infinity)
+                }
             }
         }
     }

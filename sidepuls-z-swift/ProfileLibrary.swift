@@ -166,6 +166,8 @@ enum AppPreferences {
     private static let batteryIndicatorKey = "sidepulse.battery-indicator.v1"
     private static let agentDisplayModeKey = "sidepulse.agent-display-mode.v1"
     private static let menuBarIconStyleKey = "sidepulse.menu-bar-icon-style.v1"
+    private static let notchEnabledKey = "sidepulse.notch-enabled.v1"
+    private static let notchBrightnessKey = "sidepulse.notch-brightness.v1"
     private static let universalBrightnessKey = "sidepulse.universal-brightness.v1"
     private static let flashlightModeKey = "sidepulse.flashlight-mode.v1"
     private static let proColorBalanceKey = "sidepulse.pro-color-balance.v1"
@@ -238,6 +240,23 @@ enum AppPreferences {
     static func universalBrightness(from defaults: UserDefaults = .standard) -> Double {
         guard defaults.object(forKey: universalBrightnessKey) != nil else { return 1 }
         return max(0, min(1, defaults.double(forKey: universalBrightnessKey)))
+    }
+
+    static func notchEnabled(from defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: notchEnabledKey)
+    }
+
+    static func saveNotchEnabled(_ enabled: Bool, to defaults: UserDefaults = .standard) {
+        defaults.set(enabled, forKey: notchEnabledKey)
+    }
+
+    static func notchBrightness(from defaults: UserDefaults = .standard) -> Double {
+        guard defaults.object(forKey: notchBrightnessKey) != nil else { return 1 }
+        return max(0, min(1, defaults.double(forKey: notchBrightnessKey)))
+    }
+
+    static func saveNotchBrightness(_ brightness: Double, to defaults: UserDefaults = .standard) {
+        defaults.set(max(0, min(1, brightness)), forKey: notchBrightnessKey)
     }
 
     static func saveUniversalBrightness(

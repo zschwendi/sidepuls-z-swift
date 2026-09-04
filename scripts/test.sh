@@ -25,6 +25,41 @@ xcrun swiftc \
 xcrun swiftc \
     sidepuls-z-swift/LEDProgramRenderer.swift \
     sidepuls-z-swift/Models.swift \
+    sidepuls-z-swift/NearbySignalModels.swift \
+    sidepuls-z-swift/ProfileLibrary.swift \
+    sidepuls-z-swift/NotchDisplay.swift \
+    Tests/NotchDisplaySmoke.swift \
+    -o "$test_dir/NotchDisplaySmoke"
+"$test_dir/NotchDisplaySmoke"
+
+xcrun swiftc \
+    sidepuls-z-swift/LEDProgramRenderer.swift \
+    sidepuls-z-swift/Models.swift \
+    sidepuls-z-swift/LightingEngine.swift \
+    sidepuls-z-swift/NearbySignalModels.swift \
+    sidepuls-z-swift/ProfileLibrary.swift \
+    sidepuls-z-swift/UtilityModes.swift \
+    Tests/UtilityModesSmoke.swift \
+    -o "$test_dir/UtilityModesSmoke"
+"$test_dir/UtilityModesSmoke"
+
+xcrun swiftc \
+    -default-isolation MainActor \
+    sidepuls-z-swift/MicrophoneMonitor.swift \
+    Tests/MicrophoneMonitorSmoke.swift \
+    -o "$test_dir/MicrophoneMonitorSmoke"
+"$test_dir/MicrophoneMonitorSmoke"
+
+xcrun swiftc \
+    -default-isolation MainActor \
+    sidepuls-z-swift/ProgressTaskRunner.swift \
+    Tests/ProgressTaskRunnerSmoke.swift \
+    -o "$test_dir/ProgressTaskRunnerSmoke"
+"$test_dir/ProgressTaskRunnerSmoke"
+
+xcrun swiftc \
+    sidepuls-z-swift/LEDProgramRenderer.swift \
+    sidepuls-z-swift/Models.swift \
     sidepuls-z-swift/LightingEngine.swift \
     sidepuls-z-swift/HardwareController.swift \
     Tests/SceneCompilerSmoke.swift \

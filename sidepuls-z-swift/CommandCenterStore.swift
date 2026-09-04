@@ -67,6 +67,21 @@ final class CommandCenterStore {
     var batterySettings = AppPreferences.batteryIndicatorSettings()
     var agentDisplayMode = AppPreferences.agentDisplayMode()
     var menuBarIconStyle = AppPreferences.menuBarIconStyle()
+    var notchEnabled = AppPreferences.notchEnabled()
+    var notchBrightness = AppPreferences.notchBrightness()
+    var utilityMode = UtilityOutputMode.agents
+    var microphoneSettings = UtilityPreferences.load(MicrophoneIndicatorSettings.self, key: "microphone", default: MicrophoneIndicatorSettings())
+    var timerSettings = UtilityPreferences.load(TimerIndicatorSettings.self, key: "timer", default: TimerIndicatorSettings()).normalized
+    var progressSettings = UtilityPreferences.load(ProgressIndicatorSettings.self, key: "progress", default: ProgressIndicatorSettings())
+    var microphoneSnapshot = MicrophoneSnapshot.unavailable
+    var timerState = CountdownState()
+    var timerRemaining: TimeInterval = 0
+    var progressSnapshot = ProgressTaskSnapshot.idle
+    var progressCommand = ""
+    var progressDirectory = FileManager.default.homeDirectoryForCurrentUser.path
+    var progressPID = ""
+    var utilityError: String?
+    var showsModeSettings = false
     var universalBrightness = AppPreferences.universalBrightness()
     var flashlightMode = AppPreferences.flashlightMode()
     var proColorBalance = AppPreferences.proColorBalance()
@@ -133,6 +148,15 @@ final class CommandCenterStore {
     @ObservationIgnored private var hasObservedFocusContext = false
     @ObservationIgnored private var lastObservedFocusProfileID: UUID?
     @ObservationIgnored private var softwareDisplayChangeHandler: (@MainActor @Sendable () -> Void)?
+    @ObservationIgnored private var microphoneMonitor: MicrophoneActivityMonitor?
+    @ObservationIgnored private var progressRunner: ProgressTaskRunner?
+    @ObservationIgnored private var utilityTimer: Timer?
+    @ObservationIgnored private var utilityProProgram: String?
+    @ObservationIgnored private var utilityDotProgram: String?
+    @ObservationIgnored private var utilityClockOrigin = Date.now
+    @ObservationIgnored private var utilityPreview: (pro: String, dot: String, origin: Date)?
+    @ObservationIgnored private var utilityPreviewReset: Timer?
+    @ObservationIgnored private var utilityTerminationObserver: NSObjectProtocol?
 
     init() {
         if let saved = ProfileLibrary.load(), !saved.profiles.isEmpty {
@@ -200,6 +224,7 @@ final class CommandCenterStore {
         configureEjectPrevention()
         startNearbySignalService()
         startProfileAutomation()
+        configureUtilityModes()
     }
 
     var selectedProfile: LightingProfile {
@@ -210,7 +235,9 @@ final class CommandCenterStore {
         let routedScene = device.ledCount == SidePulseDeviceKind.dot.ledCount
             ? routedDotScene
             : routedProScene
-        let underlyingProgram = device.connected ? device.sourceProgram : routedScene.program
+        let preview = device.kind == .dot ? utilityPreview?.dot : utilityPreview?.pro
+        let utility = device.kind == .dot ? utilityDotProgram : utilityProProgram
+        let underlyingProgram = preview ?? (device.connected ? device.sourceProgram : utility ?? routedScene.program)
         let program = flashlightEnabled
             ? FlashlightLighting.applying(
                 to: underlyingProgram,
@@ -228,7 +255,9 @@ final class CommandCenterStore {
     }
 
     var softwareDisplayClockOrigin: Date? {
+        if let preview = utilityPreview { return preview.origin }
         if device.connected { return device.lastWrite }
+        if utilityMode != .agents { return utilityClockOrigin }
         return device.kind == .dot ? routedDotClockOrigin : routedProClockOrigin
     }
 
@@ -312,6 +341,19 @@ final class CommandCenterStore {
     ) {
         softwareDisplayChangeHandler = handler
         handler?()
+    }
+
+    func setNotchEnabled(_ enabled: Bool) {
+        guard notchEnabled != enabled else { return }
+        notchEnabled = enabled
+        AppPreferences.saveNotchEnabled(enabled)
+        notifySoftwareDisplayChanged()
+    }
+
+    func setNotchBrightness(_ brightness: Double) {
+        notchBrightness = max(0, min(1, brightness))
+        AppPreferences.saveNotchBrightness(notchBrightness)
+        notifySoftwareDisplayChanged()
     }
 
     func selectSignalSource(
@@ -1246,32 +1288,38 @@ final class CommandCenterStore {
     }
 
     private func syncHardwareOutput(interruptsPreview: Bool = false) {
+        if interruptsPreview, utilityPreview != nil {
+            utilityPreviewReset?.invalidate()
+            utilityPreviewReset = nil
+            utilityPreview = nil
+            notifySoftwareDisplayChanged()
+        }
         let currentProStates = Dictionary(uniqueKeysWithValues: routedProScene.placementsTopToBottom.map {
             ($0.agent.id, $0.agent.state)
         })
         let currentDotStates = Dictionary(uniqueKeysWithValues: routedDotScene.placementsTopToBottom.map {
             ($0.agent.id, $0.agent.state)
         })
-        let proTiming = flashlightEnabled
+        let proTiming = flashlightEnabled || utilityMode != .agents
             ? HardwareUpdateTiming.immediate
             : hardwareTiming(from: lastProOutputStates, to: currentProStates)
-        let dotTiming = flashlightEnabled
+        let dotTiming = flashlightEnabled || utilityMode != .agents
             ? HardwareUpdateTiming.immediate
             : hardwareTiming(from: lastDotOutputStates, to: currentDotStates)
         let proProgram = flashlightEnabled
             ? FlashlightLighting.applying(
-                to: routedProScene.program,
+                to: utilityProProgram ?? routedProScene.program,
                 mode: flashlightMode,
                 ledCount: SidePulseDeviceKind.pro.ledCount
             )
-            : routedProScene.program
+            : utilityProProgram ?? routedProScene.program
         let dotProgram = flashlightEnabled
             ? FlashlightLighting.applying(
-                to: routedDotScene.program,
+                to: utilityDotProgram ?? routedDotScene.program,
                 mode: flashlightMode,
                 ledCount: SidePulseDeviceKind.dot.ledCount
             )
-            : routedDotScene.program
+            : utilityDotProgram ?? routedDotScene.program
         let brightnessScale = flashlightEnabled ? 1 : universalBrightness
         let proCalibration = flashlightEnabled ? SidePulseOutputCalibration.flashlight : proOutputCalibration
         let dotCalibration = flashlightEnabled ? SidePulseOutputCalibration.flashlight : dotOutputCalibration
@@ -1323,5 +1371,261 @@ final class CommandCenterStore {
         let thinkingStyle = selectedProfile.style(for: .working)
         guard thinkingStyle.motion.isAnimated else { return .immediate }
         return .animationBoundary(cycleSeconds: thinkingStyle.cycleSeconds)
+    }
+}
+
+extension CommandCenterStore {
+    var utilityStatusTitle: String? {
+        switch utilityMode {
+        case .agents: return nil
+        case .microphone:
+            switch microphoneSnapshot.activity {
+            case .inUse: return "Microphone in use"
+            case .muted: return "Microphone hardware muted"
+            case .idle: return "Microphone idle"
+            case .unavailable: return "Microphone unavailable"
+            }
+        case .timer: return timerState.phase == .finished ? "Timer finished" : "Timer · \(timerLabel)"
+        case .progress:
+            switch progressSnapshot.phase {
+            case .idle: return "Progress ready"
+            case .running: return progressSnapshot.fraction.map { "Progress · \(Int(($0 * 100).rounded()))%" } ?? "Task running"
+            case .completed: return "Task finished"
+            case .failed: return "Task failed"
+            case .cancelled: return "Task cancelled"
+            }
+        }
+    }
+
+    var utilityStatusDetail: String {
+        switch utilityMode {
+        case .agents: ""
+        case .microphone: microphoneSnapshot.detail
+        case .timer:
+            timerState.phase == .finished ? "Your countdown is complete. Reset the timer when you’re ready." : timerState.phase == .paused ? "Paused with \(timerLabel) remaining." : "The LEDs count down with your timer."
+        case .progress: progressSnapshot.detail
+        }
+    }
+
+    var timerLabel: String {
+        timerState.phase == .finished ? "Done" : CountdownState.label(seconds: timerRemaining)
+    }
+
+    private func configureUtilityModes() {
+        microphoneMonitor = MicrophoneActivityMonitor { [weak self] snapshot in
+            guard let self, self.utilityMode == .microphone else { return }
+            self.microphoneSnapshot = snapshot
+            self.refreshUtilityOutput()
+        }
+        progressRunner = ProgressTaskRunner { [weak self] snapshot in
+            guard let self else { return }
+            self.progressSnapshot = snapshot
+            if self.utilityMode == .progress { self.refreshUtilityOutput() }
+        }
+        utilityTerminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.progressRunner?.shutdown()
+                self?.microphoneMonitor?.stop()
+                self?.utilityTimer?.invalidate()
+            }
+        }
+    }
+
+    func selectUtilityMode(_ mode: UtilityOutputMode) {
+        let carriesFlashlightPower = mode != .agents && flashlightEnabled && !standardOutputPowerIsOn
+        utilityMode = mode
+        utilityError = nil
+        if mode != .agents { flashlightEnabled = false }
+        if carriesFlashlightPower { setOutputPower(true) }
+        if mode == .microphone { microphoneMonitor?.start() }
+        else { microphoneMonitor?.stop() }
+        utilityPreviewReset?.invalidate()
+        utilityPreview = nil
+        refreshUtilityOutput(interruptsPreview: true)
+    }
+
+    func toggleMicrophone() {
+        selectUtilityMode(utilityMode == .microphone ? .agents : .microphone)
+    }
+
+    func openUtilitySettings() {
+        showsModeSettings = true
+        selectedSection = .settings
+    }
+
+    func startTimer() {
+        timerState.start(seconds: Double(timerSettings.durationSeconds), now: .now)
+        timerRemaining = timerState.remaining(at: .now)
+        selectUtilityMode(.timer)
+        startUtilityTimer()
+    }
+
+    func pauseTimer() {
+        timerState.pause(now: .now)
+        timerRemaining = timerState.remaining(at: .now)
+        utilityTimer?.invalidate()
+        utilityTimer = nil
+        refreshUtilityOutput()
+    }
+
+    func resumeTimer() {
+        timerState.resume(now: .now)
+        timerRemaining = timerState.remaining(at: .now)
+        if timerState.phase == .running { startUtilityTimer() }
+        refreshUtilityOutput()
+    }
+
+    func resetTimer() {
+        utilityTimer?.invalidate()
+        utilityTimer = nil
+        timerState.reset()
+        timerRemaining = 0
+        if utilityMode == .timer { selectUtilityMode(.agents) }
+    }
+
+    private func startUtilityTimer() {
+        utilityTimer?.invalidate()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.timerState.tick(now: .now)
+                self.timerRemaining = self.timerState.remaining(at: .now)
+                if self.utilityMode == .timer { self.refreshUtilityOutput() }
+                if self.timerState.phase != .running {
+                    self.utilityTimer?.invalidate()
+                    self.utilityTimer = nil
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        utilityTimer = timer
+    }
+
+    func updateMicrophoneSettings(_ update: (inout MicrophoneIndicatorSettings) -> Void) {
+        update(&microphoneSettings)
+        UtilityPreferences.save(microphoneSettings, key: "microphone")
+        if utilityMode == .microphone { refreshUtilityOutput() }
+    }
+
+    func updateTimerSettings(_ update: (inout TimerIndicatorSettings) -> Void) {
+        update(&timerSettings)
+        timerSettings = timerSettings.normalized
+        UtilityPreferences.save(timerSettings, key: "timer")
+        if utilityMode == .timer { refreshUtilityOutput() }
+    }
+
+    func updateProgressSettings(_ update: (inout ProgressIndicatorSettings) -> Void) {
+        update(&progressSettings)
+        UtilityPreferences.save(progressSettings, key: "progress")
+        if utilityMode == .progress { refreshUtilityOutput() }
+    }
+
+    func chooseProgressDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose a working folder"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: progressDirectory)
+        if panel.runModal() == .OK, let url = panel.url { progressDirectory = url.path }
+    }
+
+    func runProgressCommand() {
+        do {
+            try progressRunner?.run(command: progressCommand, directory: URL(fileURLWithPath: progressDirectory))
+            selectUtilityMode(.progress)
+        } catch { utilityError = error.localizedDescription }
+    }
+
+    func watchProgressProcess() {
+        guard let pid = Int32(progressPID), pid > 0 else {
+            utilityError = "Enter the process ID of the task to watch."
+            return
+        }
+        do {
+            try progressRunner?.watch(pid: pid)
+            selectUtilityMode(.progress)
+        } catch { utilityError = error.localizedDescription }
+    }
+
+    func cancelProgress() { progressRunner?.cancel() }
+
+    func clearProgress() {
+        progressRunner?.clear()
+        if progressSnapshot.phase != .running, utilityMode == .progress { selectUtilityMode(.agents) }
+    }
+
+    func openProgressLog() {
+        if let url = progressSnapshot.logURL { NSWorkspace.shared.open(url) }
+    }
+
+    private func refreshUtilityOutput(interruptsPreview: Bool = false) {
+        let pro = utilityProgram(ledCount: 8)
+        let dot = utilityProgram(ledCount: 2)
+        if utilityProProgram != pro || utilityDotProgram != dot { utilityClockOrigin = .now }
+        utilityProProgram = pro
+        utilityDotProgram = dot
+        syncHardwareOutput(interruptsPreview: interruptsPreview)
+        notifySoftwareDisplayChanged()
+    }
+
+    private func utilityProgram(ledCount: Int) -> String? {
+        switch utilityMode {
+        case .agents: return nil
+        case .microphone:
+            let style: StateLightStyle
+            switch microphoneSnapshot.activity {
+            case .inUse: style = microphoneSettings.activeStyle
+            case .muted: style = microphoneSettings.mutedStyle
+            case .idle:
+                guard microphoneSettings.showsWhenIdle else { return "off" }
+                style = microphoneSettings.idleStyle
+            case .unavailable: return "off"
+            }
+            return UtilityLightingScenes.program(style: style, ledCount: ledCount)
+        case .timer:
+            guard timerState.isActive else { return "off" }
+            if timerState.phase == .finished {
+                return UtilityLightingScenes.program(style: timerSettings.finishedStyle, ledCount: ledCount)
+            }
+            let style = timerRemaining <= Double(timerSettings.warningSeconds) ? timerSettings.warningStyle : timerSettings.runningStyle
+            let fraction = timerSettings.gaugeMode == .bar && timerState.duration > 0 ? timerRemaining / timerState.duration : nil
+            return UtilityLightingScenes.program(style: style, ledCount: ledCount, fraction: fraction)
+        case .progress:
+            switch progressSnapshot.phase {
+            case .idle, .cancelled: return "off"
+            case .running:
+                return UtilityLightingScenes.program(style: progressSettings.runningStyle, ledCount: ledCount, fraction: progressSettings.gaugeMode == .bar ? progressSnapshot.fraction : nil)
+            case .completed:
+                return UtilityLightingScenes.program(style: progressSettings.completedStyle, ledCount: ledCount)
+            case .failed:
+                return UtilityLightingScenes.program(style: progressSettings.failedStyle, ledCount: ledCount)
+            }
+        }
+    }
+
+    func previewUtilityStyle(_ style: StateLightStyle) {
+        guard !flashlightEnabled || flashlightMode != .overrideEverything else { return }
+        let pro = UtilityLightingScenes.program(style: style, ledCount: 8)
+        let dot = UtilityLightingScenes.program(style: style, ledCount: 2)
+        utilityPreviewReset?.invalidate()
+        utilityPreview = (pro, dot, .now)
+        notifySoftwareDisplayChanged()
+        proHardware?.preview(program: flashlightEnabled ? FlashlightLighting.applying(to: pro, mode: flashlightMode, ledCount: 8) : pro,
+                             brightnessScale: flashlightEnabled ? 1 : universalBrightness,
+                             outputCalibration: flashlightEnabled ? .flashlight : proOutputCalibration, colorBalance: proColorBalance)
+        dotHardware?.preview(program: flashlightEnabled ? FlashlightLighting.applying(to: dot, mode: flashlightMode, ledCount: 2) : dot,
+                             brightnessScale: flashlightEnabled ? 1 : universalBrightness,
+                             outputCalibration: flashlightEnabled ? .flashlight : dotOutputCalibration, colorBalance: .neutral)
+        let timer = Timer(timeInterval: 3, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.utilityPreview = nil
+                self?.notifySoftwareDisplayChanged()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        utilityPreviewReset = timer
     }
 }
