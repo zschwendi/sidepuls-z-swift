@@ -146,7 +146,7 @@ enum FlashlightMode: String, Codable, CaseIterable, Identifiable, Sendable {
     var detail: String {
         switch self {
         case .overrideEverything:
-            "Hold every LED at pure white and full hardware brightness."
+            "Hold every LED at color-balanced white and full hardware brightness."
         case .behindAnimations:
             "Keep inactive LEDs white while agent colors and motion continue above them."
         }

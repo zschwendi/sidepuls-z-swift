@@ -74,7 +74,8 @@ enum LEDProgramOutputCalibration {
 }
 
 enum FlashlightLighting {
-    static let fullWhiteProgram = "brightness 255\n#FFFFFF"
+    static let calibratedWhiteHex = "#FF80FF"
+    static let maximumFlashlightProgram = "brightness 255\n\(calibratedWhiteHex)"
     private static let maximumProgramBytes = 512
     private static let maximumProgramLines = 20
 
@@ -85,7 +86,7 @@ enum FlashlightLighting {
     ) -> String {
         switch mode {
         case .overrideEverything:
-            return fullWhiteProgram
+            return maximumFlashlightProgram
         case .behindAnimations:
             let source = program.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "off"
@@ -98,11 +99,11 @@ enum FlashlightLighting {
                     lines[firstStepIndex]
                 )
                 if !hasFullInitialCoverage(lines[firstStepIndex], ledCount: ledCount) {
-                    lines.insert("#FFFFFF", at: firstStepIndex)
+                    lines.insert(calibratedWhiteHex, at: firstStepIndex)
                 }
             } else {
                 let repeatIndex = lines.firstIndex(where: { isRepeat($0) }) ?? lines.endIndex
-                lines.insert("#FFFFFF", at: repeatIndex)
+                lines.insert(calibratedWhiteHex, at: repeatIndex)
             }
             let result = LEDProgramOutputCalibration.settingBrightness(
                 in: lines.joined(separator: "\n"),
@@ -111,7 +112,7 @@ enum FlashlightLighting {
             guard result.utf8.count <= maximumProgramBytes,
                   result.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count
                     <= maximumProgramLines
-            else { return fullWhiteProgram }
+            else { return maximumFlashlightProgram }
             return result
         }
     }
@@ -123,7 +124,9 @@ enum FlashlightLighting {
                 let leadingWhitespace = segment.prefix(while: \.isWhitespace)
                 let body = segment.dropFirst(leadingWhitespace.count)
                 guard body == "off" || body.hasPrefix("off ") else { return segment }
-                return String(leadingWhitespace) + "#FFFFFF" + String(body.dropFirst("off".count))
+                return String(leadingWhitespace)
+                    + calibratedWhiteHex
+                    + String(body.dropFirst("off".count))
             }
             .joined(separator: ";")
     }
@@ -136,7 +139,7 @@ enum FlashlightLighting {
         if segments.count == 1 {
             let tokens = line.split(whereSeparator: \.isWhitespace)
             guard !tokens.isEmpty, tokens.allSatisfy({ isHexColor($0) }) else { return line }
-            return tokens.map { $0 == "#000000" ? "#FFFFFF" : String($0) }
+            return tokens.map { $0 == "#000000" ? calibratedWhiteHex : String($0) }
                 .joined(separator: " ")
         }
 
@@ -156,7 +159,7 @@ enum FlashlightLighting {
         return segments.map { rawSegment in
             let segment = String(rawSegment)
             guard segment.hasSuffix(":#000000") else { return segment }
-            return String(segment.dropLast("#000000".count)) + "#FFFFFF"
+            return String(segment.dropLast("#000000".count)) + calibratedWhiteHex
         }
         .joined(separator: ";")
     }
