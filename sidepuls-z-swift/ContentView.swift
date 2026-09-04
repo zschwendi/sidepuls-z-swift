@@ -60,38 +60,61 @@ struct ContentView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        ToolbarItem {
-            HStack(spacing: 8) {
-                Button {
+        ToolbarItem(placement: .primaryAction) {
+            HStack(spacing: 3) {
+                toolbarControl(
+                    symbol: store.flashlightEnabled ? "flashlight.on.fill" : "flashlight.off.fill",
+                    isOn: store.flashlightEnabled,
+                    activeColor: .white,
+                    label: "Flashlight",
+                    help: store.flashlightEnabled ? "Turn off Flashlight" : "Turn on Flashlight"
+                ) {
                     store.toggleFlashlight()
-                } label: {
-                    Image(systemName: store.flashlightEnabled ? "flashlight.on.fill" : "flashlight.off.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(store.flashlightEnabled ? Color.white : Color.secondary)
-                        .frame(width: 18, height: 18)
-                        .padding(5)
                 }
-                .buttonStyle(.glass)
-                .help(store.flashlightEnabled ? "Turn off Flashlight" : "Turn on Flashlight")
-                .accessibilityLabel("Flashlight")
-                .accessibilityValue(store.flashlightEnabled ? "On" : "Off")
 
-                Button {
+                Divider()
+                    .frame(height: 16)
+                    .opacity(0.45)
+
+                toolbarControl(
+                    symbol: "power",
+                    isOn: store.outputPowerIsOn,
+                    activeColor: .red,
+                    label: "Live Output",
+                    help: store.outputPowerIsOn ? "Turn off Live Output" : "Turn on Live Output"
+                ) {
                     store.toggleOutputPower()
-                } label: {
-                    Image(systemName: "power")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(store.outputPowerIsOn ? Color.red : Color.secondary)
-                        .frame(width: 18, height: 18)
-                        .padding(5)
                 }
-                .buttonStyle(.glass)
-                .help(store.outputPowerIsOn ? "Turn off Live Output" : "Turn on Live Output")
-                .accessibilityLabel("Live Output")
-                .accessibilityValue(store.outputPowerIsOn ? "On" : "Off")
             }
-            .padding(.horizontal, 4)
+            .padding(3)
+            .glassEffect(.regular, in: .capsule)
         }
+    }
+
+    private func toolbarControl(
+        symbol: String,
+        isOn: Bool,
+        activeColor: Color,
+        label: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(isOn ? activeColor.opacity(0.14) : .clear)
+
+                Image(systemName: symbol)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isOn ? activeColor : Color.secondary)
+            }
+            .frame(width: 28, height: 28)
+            .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(label)
+        .accessibilityValue(isOn ? "On" : "Off")
     }
 }
 
