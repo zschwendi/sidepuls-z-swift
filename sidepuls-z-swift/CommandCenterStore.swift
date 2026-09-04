@@ -69,6 +69,7 @@ final class CommandCenterStore {
     var menuBarIconStyle = AppPreferences.menuBarIconStyle()
     var universalBrightness = AppPreferences.universalBrightness()
     var flashlightMode = AppPreferences.flashlightMode()
+    var proColorBalance = AppPreferences.proColorBalance()
     var flashlightEnabled = false
     var ejectPreventionEnabled = AppPreferences.ejectPreventionEnabled()
     var ejectPreventionManagedExternally = false
@@ -217,7 +218,13 @@ final class CommandCenterStore {
                 ledCount: device.ledCount
             )
             : underlyingProgram
-        return LEDProgramOutputCalibration.settingBrightness(in: program, to: 255)
+        let displayBalance = device.kind == .pro ? proColorBalance : .neutral
+        return LEDProgramOutputCalibration.scalingColors(
+            in: LEDProgramOutputCalibration.settingBrightness(in: program, to: 255),
+            redScale: displayBalance.red,
+            greenScale: displayBalance.green,
+            blueScale: displayBalance.blue
+        )
     }
 
     var softwareDisplayClockOrigin: Date? {
@@ -397,6 +404,15 @@ final class CommandCenterStore {
             syncHardwareOutput(interruptsPreview: true)
             notifySoftwareDisplayChanged()
         }
+    }
+
+    func setProColorBalance(_ balance: OutputColorBalance) {
+        let normalized = balance.normalized
+        guard proColorBalance != normalized else { return }
+        proColorBalance = normalized
+        AppPreferences.saveProColorBalance(normalized)
+        syncHardwareOutput(interruptsPreview: true)
+        notifySoftwareDisplayChanged()
     }
 
     func setFlashlightEnabled(_ enabled: Bool) {
@@ -931,7 +947,8 @@ final class CommandCenterStore {
                 )
                 : proPreview.program,
             brightnessScale: usesFlashlight ? 1 : universalBrightness,
-            outputCalibration: usesFlashlight ? .flashlight : proOutputCalibration
+            outputCalibration: usesFlashlight ? .flashlight : proOutputCalibration,
+            colorBalance: proColorBalance
         )
         dotHardware?.preview(
             program: usesFlashlight
@@ -942,7 +959,8 @@ final class CommandCenterStore {
                 )
                 : dotPreview.program,
             brightnessScale: usesFlashlight ? 1 : universalBrightness,
-            outputCalibration: usesFlashlight ? .flashlight : dotOutputCalibration
+            outputCalibration: usesFlashlight ? .flashlight : dotOutputCalibration,
+            colorBalance: .neutral
         )
     }
 
@@ -984,6 +1002,7 @@ final class CommandCenterStore {
                 : proTransition.program,
             brightnessScale: usesFlashlight ? 1 : universalBrightness,
             outputCalibration: usesFlashlight ? .flashlight : proOutputCalibration,
+            colorBalance: proColorBalance,
             duration: proTransition.duration
         )
         dotHardware?.preview(
@@ -996,6 +1015,7 @@ final class CommandCenterStore {
                 : dotTransition.program,
             brightnessScale: usesFlashlight ? 1 : universalBrightness,
             outputCalibration: usesFlashlight ? .flashlight : dotOutputCalibration,
+            colorBalance: .neutral,
             duration: dotTransition.duration
         )
     }
@@ -1260,6 +1280,7 @@ final class CommandCenterStore {
             program: proProgram,
             brightnessScale: brightnessScale,
             outputCalibration: proCalibration,
+            colorBalance: proColorBalance,
             timing: proTiming,
             interruptsPreview: interruptsPreview
         )
@@ -1268,6 +1289,7 @@ final class CommandCenterStore {
             program: dotProgram,
             brightnessScale: brightnessScale,
             outputCalibration: dotCalibration,
+            colorBalance: .neutral,
             timing: flashlightEnabled ? .immediate : dotHardwareTiming(from: dotTiming),
             interruptsPreview: interruptsPreview
         )

@@ -70,6 +70,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
         program: String,
         brightnessScale: Double = 1,
         outputCalibration: SidePulseOutputCalibration? = nil,
+        colorBalance: OutputColorBalance = .neutral,
         timing: HardwareUpdateTiming = .immediate,
         interruptsPreview: Bool = false
     ) {
@@ -81,7 +82,8 @@ final class SidePulseHardwareController: @unchecked Sendable {
                     universalBrightness: brightnessScale,
                     calibration: outputCalibration
                 ),
-                blueScale: (outputCalibration ?? kind.defaultOutputCalibration).normalized.blueScale
+                blueScale: (outputCalibration ?? kind.defaultOutputCalibration).normalized.blueScale,
+                colorBalance: colorBalance
             )
             let wasEnabled = outputEnabled
             let enabledChanged = enabled != outputEnabled
@@ -136,6 +138,7 @@ final class SidePulseHardwareController: @unchecked Sendable {
         program: String,
         brightnessScale: Double = 1,
         outputCalibration: SidePulseOutputCalibration? = nil,
+        colorBalance: OutputColorBalance = .neutral,
         duration: TimeInterval = 3
     ) {
         queue.async { [weak self] in
@@ -146,7 +149,8 @@ final class SidePulseHardwareController: @unchecked Sendable {
                     universalBrightness: brightnessScale,
                     calibration: outputCalibration
                 ),
-                blueScale: (outputCalibration ?? kind.defaultOutputCalibration).normalized.blueScale
+                blueScale: (outputCalibration ?? kind.defaultOutputCalibration).normalized.blueScale,
+                colorBalance: colorBalance
             )
             cancelDeferredWriteLocked()
             previewGeneration += 1

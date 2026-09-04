@@ -149,6 +149,15 @@ enum ProfileLibrarySmoke {
         precondition(AppPreferences.flashlightMode(from: preferencesDefaults) == .overrideEverything)
         AppPreferences.saveFlashlightMode(.behindAnimations, to: preferencesDefaults)
         precondition(AppPreferences.flashlightMode(from: preferencesDefaults) == .behindAnimations)
+        precondition(AppPreferences.proColorBalance(from: preferencesDefaults) == .standard)
+        AppPreferences.saveProColorBalance(
+            OutputColorBalance(red: 0.8, green: -1, blue: 2),
+            to: preferencesDefaults
+        )
+        precondition(
+            AppPreferences.proColorBalance(from: preferencesDefaults)
+                == OutputColorBalance(red: 0.8, green: 0, blue: 1)
+        )
         precondition(AppPreferences.ejectPreventionEnabled(from: preferencesDefaults))
         AppPreferences.saveEjectPreventionEnabled(false, to: preferencesDefaults)
         precondition(!AppPreferences.ejectPreventionEnabled(from: preferencesDefaults))
@@ -248,7 +257,7 @@ enum ProfileLibrarySmoke {
         precondition(identityMigrationDefaults.string(forKey: "sidepulse.agent-display-mode.v1") == "perAgent")
         precondition(identityMigrationDefaults.object(forKey: "NSWindow Frame command-center") == nil)
 
-        print("Profile library smoke passed: profiles, display mode, menu icon, brightness, flashlight, eject prevention, nearby routing, and battery preferences persist independently")
+        print("Profile library smoke passed: profiles, display mode, menu icon, brightness, color balance, flashlight, eject prevention, nearby routing, and battery preferences persist independently")
     }
 
     private static func require<T>(_ value: T?) throws -> T {

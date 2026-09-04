@@ -168,6 +168,7 @@ enum AppPreferences {
     private static let menuBarIconStyleKey = "sidepulse.menu-bar-icon-style.v1"
     private static let universalBrightnessKey = "sidepulse.universal-brightness.v1"
     private static let flashlightModeKey = "sidepulse.flashlight-mode.v1"
+    private static let proColorBalanceKey = "sidepulse.pro-color-balance.v1"
     private static let nearbyMirroringModeKey = "sidepulse.nearby-mirroring-mode.v1"
     private static let selectedNearbyPeerKey = "sidepulse.selected-nearby-peer.v1"
     private static let nearbySharingEnabledKey = "sidepulse.nearby-sharing-enabled.v2"
@@ -258,6 +259,25 @@ enum AppPreferences {
         to defaults: UserDefaults = .standard
     ) {
         defaults.set(mode.rawValue, forKey: flashlightModeKey)
+    }
+
+    static func proColorBalance(
+        from defaults: UserDefaults = .standard
+    ) -> OutputColorBalance {
+        guard let data = defaults.data(forKey: proColorBalanceKey),
+              let balance = try? JSONDecoder().decode(OutputColorBalance.self, from: data)
+        else { return .standard }
+        return balance.normalized
+    }
+
+    static func saveProColorBalance(
+        _ balance: OutputColorBalance,
+        to defaults: UserDefaults = .standard
+    ) {
+        defaults.set(
+            try? JSONEncoder().encode(balance.normalized),
+            forKey: proColorBalanceKey
+        )
     }
 
     static func nearbyMirroringMode(

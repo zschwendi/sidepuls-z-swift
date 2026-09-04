@@ -321,6 +321,21 @@ struct SignalModeControl: View {
                 .accessibilityValue("\(Int((store.universalBrightness * 100).rounded())) percent")
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Color balance", systemImage: "camera.filters")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Text("Adjust red, green, and blue output across every SidePulse Pro lighting mode. SidePulse Dot is unchanged.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                colorBalanceSlider("Red", tint: .red, keyPath: \.red)
+                colorBalanceSlider("Green", tint: .green, keyPath: \.green)
+                colorBalanceSlider("Blue", tint: .blue, keyPath: \.blue)
+            }
+
             Divider()
 
             VStack(alignment: .leading, spacing: 7) {
@@ -392,6 +407,41 @@ struct SignalModeControl: View {
         .glassEffect(.regular.tint(.cyan.opacity(0.06)), in: .rect(cornerRadius: 22))
         .onAppear {
             store.refreshLaunchAtLoginStatus()
+        }
+    }
+
+    private func colorBalanceSlider(
+        _ title: String,
+        tint: Color,
+        keyPath: WritableKeyPath<OutputColorBalance, Double>
+    ) -> some View {
+        let value = store.proColorBalance[keyPath: keyPath]
+        return HStack(spacing: 8) {
+            Text(title)
+                .font(.caption2)
+                .frame(width: 36, alignment: .leading)
+
+            Slider(
+                value: Binding(
+                    get: { store.proColorBalance[keyPath: keyPath] },
+                    set: { newValue in
+                        var balance = store.proColorBalance
+                        balance[keyPath: keyPath] = newValue
+                        store.setProColorBalance(balance)
+                    }
+                ),
+                in: 0...1,
+                step: 0.01
+            )
+            .tint(tint)
+            .controlSize(.small)
+            .accessibilityLabel("\(title) Color Balance")
+            .accessibilityValue("\(Int((value * 100).rounded())) percent")
+
+            Text("\(Int((value * 100).rounded()))%")
+                .font(.caption2.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, alignment: .trailing)
         }
     }
 }

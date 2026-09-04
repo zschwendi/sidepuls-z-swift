@@ -4,11 +4,15 @@ enum LEDProgramOutputCalibration {
     static func applying(
         to program: String,
         brightnessScale: Double,
-        blueScale: Double
+        blueScale: Double,
+        colorBalance: OutputColorBalance = .neutral
     ) -> String {
-        scalingBlue(
+        let balance = colorBalance.normalized
+        return scalingColors(
             in: scalingBrightness(in: program, by: brightnessScale),
-            by: blueScale
+            redScale: balance.red,
+            greenScale: balance.green,
+            blueScale: balance.blue * blueScale
         )
     }
 
@@ -41,8 +45,19 @@ enum LEDProgramOutputCalibration {
     }
 
     static func scalingBlue(in program: String, by scale: Double) -> String {
-        let clampedScale = max(0, min(1.25, scale))
-        guard clampedScale != 1 else { return program }
+        scalingColors(in: program, redScale: 1, greenScale: 1, blueScale: scale)
+    }
+
+    static func scalingColors(
+        in program: String,
+        redScale: Double,
+        greenScale: Double,
+        blueScale: Double
+    ) -> String {
+        let redScale = max(0, min(1.5, redScale))
+        let greenScale = max(0, min(1.5, greenScale))
+        let blueScale = max(0, min(1.5, blueScale))
+        guard redScale != 1 || greenScale != 1 || blueScale != 1 else { return program }
 
         var result = ""
         var cursor = program.startIndex
@@ -62,10 +77,15 @@ enum LEDProgramOutputCalibration {
                 continue
             }
 
-            let red = (raw >> 16) & 0xFF
-            let green = (raw >> 8) & 0xFF
-            let blue = Int((Double(raw & 0xFF) * clampedScale).rounded())
-            result += String(format: "#%02X%02X%02X", red, green, max(0, min(255, blue)))
+            let red = Int((Double((raw >> 16) & 0xFF) * redScale).rounded())
+            let green = Int((Double((raw >> 8) & 0xFF) * greenScale).rounded())
+            let blue = Int((Double(raw & 0xFF) * blueScale).rounded())
+            result += String(
+                format: "#%02X%02X%02X",
+                max(0, min(255, red)),
+                max(0, min(255, green)),
+                max(0, min(255, blue))
+            )
             cursor = end
         }
         result += program[cursor...]
@@ -74,8 +94,7 @@ enum LEDProgramOutputCalibration {
 }
 
 enum FlashlightLighting {
-    static let calibratedWhiteHex = "#FF80FF"
-    static let maximumFlashlightProgram = "brightness 255\n\(calibratedWhiteHex)"
+    static let maximumFlashlightProgram = "brightness 255\n#FFFFFF"
     private static let maximumProgramBytes = 512
     private static let maximumProgramLines = 20
 
@@ -99,11 +118,11 @@ enum FlashlightLighting {
                     lines[firstStepIndex]
                 )
                 if !hasFullInitialCoverage(lines[firstStepIndex], ledCount: ledCount) {
-                    lines.insert(calibratedWhiteHex, at: firstStepIndex)
+                    lines.insert("#FFFFFF", at: firstStepIndex)
                 }
             } else {
                 let repeatIndex = lines.firstIndex(where: { isRepeat($0) }) ?? lines.endIndex
-                lines.insert(calibratedWhiteHex, at: repeatIndex)
+                lines.insert("#FFFFFF", at: repeatIndex)
             }
             let result = LEDProgramOutputCalibration.settingBrightness(
                 in: lines.joined(separator: "\n"),
@@ -125,7 +144,7 @@ enum FlashlightLighting {
                 let body = segment.dropFirst(leadingWhitespace.count)
                 guard body == "off" || body.hasPrefix("off ") else { return segment }
                 return String(leadingWhitespace)
-                    + calibratedWhiteHex
+                    + "#FFFFFF"
                     + String(body.dropFirst("off".count))
             }
             .joined(separator: ";")
@@ -139,7 +158,7 @@ enum FlashlightLighting {
         if segments.count == 1 {
             let tokens = line.split(whereSeparator: \.isWhitespace)
             guard !tokens.isEmpty, tokens.allSatisfy({ isHexColor($0) }) else { return line }
-            return tokens.map { $0 == "#000000" ? calibratedWhiteHex : String($0) }
+            return tokens.map { $0 == "#000000" ? "#FFFFFF" : String($0) }
                 .joined(separator: " ")
         }
 
@@ -159,7 +178,7 @@ enum FlashlightLighting {
         return segments.map { rawSegment in
             let segment = String(rawSegment)
             guard segment.hasSuffix(":#000000") else { return segment }
-            return String(segment.dropLast("#000000".count)) + calibratedWhiteHex
+            return String(segment.dropLast("#000000".count)) + "#FFFFFF"
         }
         .joined(separator: ";")
     }

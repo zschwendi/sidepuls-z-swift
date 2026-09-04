@@ -475,18 +475,18 @@ enum SceneCompilerSmoke {
             FlashlightLighting.applying(
                 to: "brightness 73\noff\n0:#6A1259 600ms pulse;1:#000000 600ms pulse\nrepeat",
                 mode: .overrideEverything
-            ) == "brightness 255\n#FF80FF"
+            ) == "brightness 255\n#FFFFFF"
         )
         precondition(
             FlashlightLighting.applying(
                 to: "brightness 73\noff\n0:#6A1259 600ms pulse;1:#000000 600ms pulse\nrepeat",
                 mode: .behindAnimations,
                 ledCount: 2
-            ) == "brightness 255\n#FF80FF\n0:#6A1259 600ms pulse;1:#000000 600ms pulse\nrepeat"
+            ) == "brightness 255\n#FFFFFF\n0:#6A1259 600ms pulse;1:#000000 600ms pulse\nrepeat"
         )
         precondition(
             FlashlightLighting.applying(to: "off", mode: .behindAnimations)
-                == "brightness 255\n#FF80FF"
+                == "brightness 255\n#FFFFFF"
         )
         let flashlightUnderlay = LEDFirmwareProgram(
             program: FlashlightLighting.applying(
@@ -498,12 +498,12 @@ enum SceneCompilerSmoke {
         )
         for sample in stride(from: 0.0, through: 1.0, by: 0.05) {
             let frame = flashlightUnderlay.frame(at: sample)
-            precondition(frame.colors[1] == LEDProgramColor(red: 1, green: 128.0 / 255.0, blue: 1))
-            precondition(frame.colors[2] == LEDProgramColor(red: 1, green: 128.0 / 255.0, blue: 1))
+            precondition(frame.colors[1] == LEDProgramColor(red: 1, green: 1, blue: 1))
+            precondition(frame.colors[2] == LEDProgramColor(red: 1, green: 1, blue: 1))
         }
         precondition(
             flashlightUnderlay.frame(at: 0.5).colors[0]
-                != LEDProgramColor(red: 1, green: 128.0 / 255.0, blue: 1),
+                != LEDProgramColor(red: 1, green: 1, blue: 1),
             "Behind Animations must preserve the colored pulse over the white underlay"
         )
         precondition(
@@ -511,7 +511,7 @@ enum SceneCompilerSmoke {
                 to: "#FF0000 #00FF00",
                 mode: .behindAnimations,
                 ledCount: 8
-            ) == "brightness 255\n#FF80FF\n#FF0000 #00FF00",
+            ) == "brightness 255\n#FFFFFF\n#FF0000 #00FF00",
             "Behind Animations must fill omitted LED positions with white"
         )
         precondition(
@@ -519,7 +519,7 @@ enum SceneCompilerSmoke {
                 to: "0:#FF0000;1:#000000;2:#000000",
                 mode: .behindAnimations,
                 ledCount: 3
-            ) == "brightness 255\n0:#FF0000;1:#FF80FF;2:#FF80FF",
+            ) == "brightness 255\n0:#FF0000;1:#FFFFFF;2:#FFFFFF",
             "Compiler base-frame placeholders must become the white underlay"
         )
         precondition(
@@ -527,7 +527,7 @@ enum SceneCompilerSmoke {
                 to: "#000000",
                 mode: .behindAnimations,
                 ledCount: 8
-            ) == "brightness 255\n#FF80FF",
+            ) == "brightness 255\n#FFFFFF",
             "An untimed black base is an off LED and must become white"
         )
         precondition(
@@ -535,7 +535,7 @@ enum SceneCompilerSmoke {
                 to: "0:#000000 1s linear",
                 mode: .behindAnimations,
                 ledCount: 8
-            ) == "brightness 255\n#FF80FF\n0:#000000 1s linear",
+            ) == "brightness 255\n#FFFFFF\n0:#000000 1s linear",
             "A timed black animation target must remain intact above the white underlay"
         )
         let repeatOnlyFlashlight = FlashlightLighting.applying(
@@ -543,11 +543,11 @@ enum SceneCompilerSmoke {
             mode: .behindAnimations,
             ledCount: 8
         )
-        precondition(repeatOnlyFlashlight == "brightness 255\n#FF80FF\nrepeat")
+        precondition(repeatOnlyFlashlight == "brightness 255\n#FFFFFF\nrepeat")
         precondition(
             LEDFirmwareProgram(program: repeatOnlyFlashlight, ledCount: 8)
                 .frame(at: 0).colors.allSatisfy {
-                    $0 == LEDProgramColor(red: 1, green: 128.0 / 255.0, blue: 1)
+                    $0 == LEDProgramColor(red: 1, green: 1, blue: 1)
                 },
             "A step-less program must insert white before its repeat terminator"
         )
@@ -564,8 +564,28 @@ enum SceneCompilerSmoke {
             LEDProgramOutputCalibration.applying(
                 to: FlashlightLighting.maximumFlashlightProgram,
                 brightnessScale: SidePulseOutputCalibration.flashlight.brightnessScale,
-                blueScale: SidePulseOutputCalibration.flashlight.blueScale
+                blueScale: SidePulseOutputCalibration.flashlight.blueScale,
+                colorBalance: .standard
             ) == "brightness 255\n#FF80FF"
+        )
+        precondition(OutputColorBalance.standard.colorHex == "#FF80FF")
+        precondition(
+            LEDProgramOutputCalibration.applying(
+                to: "brightness 200\n0:#804020;1:#40A0FF",
+                brightnessScale: 1,
+                blueScale: 1,
+                colorBalance: .standard
+            ) == "brightness 200\n0:#802020;1:#4050FF",
+            "Global color balance must scale every physical lighting color"
+        )
+        precondition(
+            LEDProgramOutputCalibration.applying(
+                to: "brightness 200\n0:#804020;1:#40A0FF",
+                brightnessScale: 1,
+                blueScale: 1,
+                colorBalance: .neutral
+            ) == "brightness 200\n0:#804020;1:#40A0FF",
+            "SidePulse Dot's neutral color balance must leave its colors unchanged"
         )
         precondition(
             LEDProgramOutputCalibration.scalingBrightness(in: batteryGauge.program, by: 0.4)

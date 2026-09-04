@@ -146,10 +146,37 @@ enum FlashlightMode: String, Codable, CaseIterable, Identifiable, Sendable {
     var detail: String {
         switch self {
         case .overrideEverything:
-            "Hold every LED at color-balanced white and full hardware brightness."
+            "Hold every SidePulse Pro LED at your color balance and full hardware brightness. SidePulse Dot stays neutral."
         case .behindAnimations:
-            "Keep inactive LEDs white while agent colors and motion continue above them."
+            "Keep inactive SidePulse Pro LEDs at your color balance while agent colors and motion continue. SidePulse Dot stays neutral."
         }
+    }
+}
+
+struct OutputColorBalance: Codable, Equatable, Sendable {
+    var red: Double
+    var green: Double
+    var blue: Double
+
+    static let neutral = OutputColorBalance(red: 1, green: 1, blue: 1)
+    static let standard = OutputColorBalance(red: 1, green: 0.5, blue: 1)
+
+    var normalized: OutputColorBalance {
+        OutputColorBalance(
+            red: max(0, min(1, red)),
+            green: max(0, min(1, green)),
+            blue: max(0, min(1, blue))
+        )
+    }
+
+    var colorHex: String {
+        let value = normalized
+        return String(
+            format: "#%02X%02X%02X",
+            Int((value.red * 255).rounded()),
+            Int((value.green * 255).rounded()),
+            Int((value.blue * 255).rounded())
+        )
     }
 }
 

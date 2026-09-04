@@ -15,8 +15,8 @@ SidePulse Z is a native macOS app for seeing what your AI coding agents are doin
 - Uses magenta for working, yellow for approval, green for finished, and red for failed.
 - Keeps the physical lights, live array, and animated menu-bar icon in sync.
 - Opens an agent directly from the menu bar or Agent Hub.
-- Includes custom colors, animations, brightness, battery indicators, profiles, and Focus automation.
-- Adds a full-brightness, color-balanced white flashlight that can override lighting or sit behind agent animations.
+- Includes custom colors, animations, brightness, SidePulse Pro RGB color balance, battery indicators, profiles, and Focus automation.
+- Adds a full-brightness white flashlight that can override lighting or sit behind agent animations.
 - Drives SidePulse Pro and SidePulse Dot as standalone outputs; neither device requires the other.
 - Keeps SidePulse Pro mounted through software eject attempts after lock or hibernate.
 - Lets each SidePulse use this Mac, one nearby Mac, or all discovered Macs over Bonjour.
