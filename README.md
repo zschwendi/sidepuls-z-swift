@@ -17,8 +17,10 @@ SidePulse Z is a native macOS app for seeing what your AI coding agents are doin
 - Opens an agent directly from the menu bar or Agent Hub.
 - Includes custom colors, animations, brightness, SidePulse Pro RGB color balance, battery indicators, profiles, and Focus automation.
 - Adds a full-brightness white flashlight that can override lighting or sit behind agent animations.
-- Puts Microphone, Timer, and optional SidePulse Notch controls beside Flashlight in the main toolbar and menu-bar popover.
-- Shows microphone activity without recording audio, with hardware-mute status when the device exposes it. App-specific software mute is not a reliable system signal.
+- Puts ON AIR, Coffee, Timer, and optional SidePulse Notch controls beside Flashlight in the main toolbar and menu-bar popover.
+- ON AIR overlays microphone activity on agent lighting, with hardware-mute status when the device exposes it. It observes activity without recording audio. App-specific software mute is not a reliable system signal.
+- Expands the notch on hover into an island with the driving agents, Command Center, Coffee and power controls. Its height follows the agent list and its collapsed width follows the actual display notch.
+- Keeps Pro color-balance correction on the hardware; app, menu-bar and notch colors use the original saved colors.
 - Includes a customizable countdown with pause/resume, a warning color, and a finished signal. Its countdown stays visible while running and catches up after system sleep.
 - Adds Progress in Lighting Studio: run a command or watch an existing process, with customizable running, finished, and failed signals.
 - Drives SidePulse Pro and SidePulse Dot as standalone outputs; neither device requires the other.
@@ -48,11 +50,44 @@ The repository currently ships as source rather than a notarized macOS download.
 
 ## Utility modes
 
-Open **Settings → Modes** to customize microphone and timer colors, colorways,
+Open **Settings → Modes** to customize ON AIR and timer colors, colorways,
 motion, intensity, and speed. The notch has its own brightness control and is
 disabled by default; its colors mirror the selected lighting. Selecting a mode
 uses it for the LEDs without changing your agent profiles. **Agent lighting**
 returns to your existing setup. Timers keep counting if you select another mode.
+
+ON AIR shows an orange inward pulse while a microphone is active and returns
+to the current agent signal immediately when input stops. Microphone, hardware
+mute, recording and screenshot styles are independently editable. Recording
+detection currently covers Apple's Screenshot app and requires Accessibility
+access, enabled from the ON AIR settings. Saved screenshots use Spotlight's
+screen-capture metadata; indexing can delay the white sweep and clipboard-only
+captures are not reported. SidePulse does not read image or clipboard contents.
+
+The notch menu-bar settings can hide SidePulse's menu-bar icon while the notch
+is visible, with an exception for fullscreen apps and an auto-hidden menu bar.
+Clicking the icon in fullscreen opens and brings you to Command Center.
+
+Coffee holds a native idle-sleep assertion while SidePulse runs. On Apple Silicon,
+its earlier private clamshell mask proved insufficient: macOS could enter
+Clamshell Sleep while the app reported protection. Closed-lid protection now
+uses an administrator-authorized companion and the same `pmset disablesleep`
+setting used by Amphetamine Power Protect. Enable it in **Settings → Modes →
+Coffee**; authentication is needed once per SidePulse launch. Turning Coffee
+off and back on reuses that companion. No launch daemon or sudoers rule is
+installed. The display can still turn off while the Mac continues working.
+
+The app reports lid protection only after reading `SleepDisabled` back from
+macOS. A pre-existing sleep block is preserved without taking ownership. If
+that block ends while Coffee is active, SidePulse takes over. The companion
+restores its own change when Coffee turns off or the app's connection closes,
+including after a main-app crash, and verifies restoration. The setting is
+system-wide and persistent; other apps writing the same value cannot be
+independently tracked. Avoid running concurrent closed-lid sessions in multiple
+utilities. A killed/crashed companion cannot guarantee cleanup; if normal
+sleep remains blocked after quitting SidePulse, restore it with
+`sudo pmset -a disablesleep 0`. Physical lid-close and power-transition testing
+is required on the running Mac; a build or successful API call is not proof.
 
 Open **Lighting Studio → Progress** to run a command in a chosen folder or watch
 a process by its PID. Running a command records its exit status. Watching an

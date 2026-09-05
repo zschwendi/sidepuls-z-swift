@@ -82,9 +82,16 @@ final class MicrophoneActivityMonitor {
     )
 
     private let onChange: OnChange
-    private var timer: Timer?
+    private struct ListenerRegistration {
+        let objectID: AudioObjectID
+        let address: AudioObjectPropertyAddress
+        let queue: DispatchQueue
+        let block: AudioObjectPropertyListenerBlock
+    }
+
+    private var listenerRegistrations: [ListenerRegistration] = []
+    private var fallbackPollTask: Task<Void, Never>?
     private var isEnabled = false
-    private var lastPollUptime: TimeInterval?
     private var lastSnapshot: MicrophoneSnapshot?
 
     init(onChange: @escaping @MainActor @Sendable (MicrophoneSnapshot) -> Void) {
@@ -94,24 +101,23 @@ final class MicrophoneActivityMonitor {
     func start() {
         guard !isEnabled else { return }
         isEnabled = true
-        lastPollUptime = nil
         lastSnapshot = nil
-
-        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.poll()
+        refreshListeners()
+        poll()
+        fallbackPollTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard let self, self.isEnabled else { return }
+                self.poll()
             }
         }
-        self.timer = timer
-        RunLoop.main.add(timer, forMode: .common)
-        poll()
     }
 
     func stop() {
         isEnabled = false
-        timer?.invalidate()
-        timer = nil
-        lastPollUptime = nil
+        fallbackPollTask?.cancel()
+        fallbackPollTask = nil
+        removeAllListeners()
         lastSnapshot = nil
     }
 
@@ -168,13 +174,69 @@ final class MicrophoneActivityMonitor {
 
     private func poll() {
         guard isEnabled else { return }
-        let now = ProcessInfo.processInfo.systemUptime
-        if let lastPollUptime, now - lastPollUptime < 1.0 { return }
-        self.lastPollUptime = now
         let next = currentSnapshot()
         guard next != lastSnapshot else { return }
         lastSnapshot = next
         onChange(next)
+    }
+
+    private func refreshListeners() {
+        guard isEnabled else { return }
+        removeAllListeners()
+        addListener(on: Self.systemObjectID, address: Self.devicesAddress)
+        addListener(on: Self.systemObjectID, address: Self.processObjectListAddress)
+
+        for deviceID in inputDeviceIDs() ?? [] {
+            addListener(on: deviceID, address: Self.inputStreamsAddress)
+            addListener(on: deviceID, address: Self.inputMuteAddress)
+        }
+        for processObjectID in processObjectIDs() ?? [] {
+            addListener(on: processObjectID, address: Self.processRunningInputAddress)
+            addListener(on: processObjectID, address: Self.processInputDevicesAddress)
+        }
+    }
+
+    private func addListener(
+        on objectID: AudioObjectID,
+        address: AudioObjectPropertyAddress
+    ) {
+        let queue = DispatchQueue.main
+        let refreshesListenerSet = objectID == Self.systemObjectID
+            && (address.mSelector == kAudioHardwarePropertyDevices
+                || address.mSelector == kAudioHardwarePropertyProcessObjectList)
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isEnabled else { return }
+                if refreshesListenerSet {
+                    self.refreshListeners()
+                }
+                self.poll()
+            }
+        }
+        var address = address
+        let status = AudioObjectAddPropertyListenerBlock(objectID, &address, queue, block)
+        guard status == kAudioHardwareNoError else { return }
+        listenerRegistrations.append(
+            ListenerRegistration(
+                objectID: objectID,
+                address: address,
+                queue: queue,
+                block: block
+            )
+        )
+    }
+
+    private func removeAllListeners() {
+        for registration in listenerRegistrations {
+            var address = registration.address
+            AudioObjectRemovePropertyListenerBlock(
+                registration.objectID,
+                &address,
+                registration.queue,
+                registration.block
+            )
+        }
+        listenerRegistrations.removeAll(keepingCapacity: true)
     }
 
     private func currentSnapshot() -> MicrophoneSnapshot {

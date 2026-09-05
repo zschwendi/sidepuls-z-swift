@@ -587,6 +587,23 @@ enum SceneCompilerSmoke {
             ) == "brightness 200\n0:#804020;1:#40A0FF",
             "SidePulse Dot's neutral color balance must leave its colors unchanged"
         )
+        let softwareDisplayProgram = LEDProgramOutputCalibration.settingBrightness(
+            in: "brightness 200\n0:#804020;1:#40A0FF",
+            to: 255
+        )
+        precondition(
+            softwareDisplayProgram == "brightness 255\n0:#804020;1:#40A0FF",
+            "Software previews must preserve raw program colors"
+        )
+        precondition(
+            LEDProgramOutputCalibration.scalingColors(
+                in: softwareDisplayProgram,
+                redScale: OutputColorBalance.standard.red,
+                greenScale: OutputColorBalance.standard.green,
+                blueScale: OutputColorBalance.standard.blue
+            ) != softwareDisplayProgram,
+            "The hardware color balance must not be reused for software previews"
+        )
         precondition(
             LEDProgramOutputCalibration.scalingBrightness(in: batteryGauge.program, by: 0.4)
                 .hasPrefix("brightness 102\n")

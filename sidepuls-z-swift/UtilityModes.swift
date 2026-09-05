@@ -5,7 +5,7 @@ enum UtilityOutputMode: String, CaseIterable, Sendable {
     var title: String {
         switch self {
         case .agents: "Agents"
-        case .microphone: "Microphone"
+        case .microphone: "ON AIR"
         case .timer: "Timer"
         case .progress: "Progress"
         }
@@ -19,10 +19,19 @@ enum UtilityGaugeMode: String, Codable, CaseIterable, Identifiable, Sendable {
 }
 
 struct MicrophoneIndicatorSettings: Codable, Equatable, Sendable {
-    var activeStyle = StateLightStyle(state: .working, colorHex: "#FF3B30", motion: .solid, cycleSeconds: 2, intensity: 0.8)
+    static let onAirStyle = StateLightStyle(state: .working, colorHex: "#FF9F0A", motion: .converge, cycleSeconds: 1.8, intensity: 0.9)
+    var activeStyle = Self.onAirStyle
     var mutedStyle = StateLightStyle(state: .waiting, colorHex: "#FFD60A", motion: .solid, cycleSeconds: 2, intensity: 0.6)
     var idleStyle = StateLightStyle(state: .idle, colorHex: "#30D158", motion: .solid, cycleSeconds: 2, intensity: 0.25)
-    var showsWhenIdle = true
+    var showsWhenIdle = false
+
+    var upgradingLegacyAppearance: Self {
+        var value = self
+        let oldDefault = StateLightStyle(state: .working, colorHex: "#FF3B30", motion: .solid, cycleSeconds: 2, intensity: 0.8)
+        if value.activeStyle == oldDefault { value.activeStyle = Self.onAirStyle }
+        value.showsWhenIdle = false
+        return value
+    }
 }
 
 struct TimerIndicatorSettings: Codable, Equatable, Sendable {

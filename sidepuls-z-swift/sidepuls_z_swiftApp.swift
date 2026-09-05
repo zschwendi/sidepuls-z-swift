@@ -3,6 +3,13 @@ import QuartzCore
 import SwiftUI
 
 @main
+enum SidePulseMain {
+    static func main() {
+        guard !CoffeePowerProtect.runIfRequested(), !ClosedLidSleepGuard.runIfRequested() else { return }
+        SidePulseCommandCenterApp.main()
+    }
+}
+
 struct SidePulseCommandCenterApp: App {
     @State private var store: CommandCenterStore
     private let menuBarController: SidePulseMenuBarController
@@ -16,10 +23,48 @@ struct SidePulseCommandCenterApp: App {
 
     var body: some Scene {
         WindowGroup("SidePulse Command Center", id: "command-center") {
-            ContentView(store: store)
+            CommandCenterRootView(store: store, menuBarController: menuBarController)
         }
         .defaultSize(width: 940, height: 640)
     }
+}
+
+private struct CommandCenterRootView: View {
+    let store: CommandCenterStore
+    let menuBarController: SidePulseMenuBarController
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        ContentView(store: store)
+            .background(CommandCenterWindowReader(register: menuBarController.registerCommandCenter))
+            .onAppear {
+                menuBarController.createCommandCenter = { openWindow(id: "command-center") }
+            }
+    }
+}
+
+private struct CommandCenterWindowReader: NSViewRepresentable {
+    let register: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> WindowReaderView {
+        let view = WindowReaderView()
+        view.register = register
+        return view
+    }
+
+    func updateNSView(_ nsView: WindowReaderView, context: Context) {}
+
+    final class WindowReaderView: NSView {
+        var register: ((NSWindow) -> Void)?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window { register?(window) }
+        }
+    }
+}
+
+private final class NotchIslandHostingView: NSHostingView<NotchIslandView> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 @MainActor
@@ -36,6 +81,13 @@ private final class SidePulseMenuBarController: NSObject {
     private var renderedClockOrigin: Date?
     private var renderedIconStyle: MenuBarIconStyle = .horizontalEight
     private var statusItemVisibilityObservation: NSKeyValueObservation?
+    private var presentationObservation: NSKeyValueObservation?
+    private var lastRequestedVisibility: Bool?
+    private var lastExternalPresentation: NSApplication.PresentationOptions = []
+    private var activatedAt = Date.distantPast
+    private weak var commandCenterWindow: NSWindow?
+    private var commandCenterRequested = false
+    var createCommandCenter: (() -> Void)?
 
     init(store: CommandCenterStore) {
         self.store = store
@@ -76,6 +128,17 @@ private final class SidePulseMenuBarController: NSObject {
         hostingController.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hostingController
 
+        notchDisplay.setIslandContent(NotchIslandHostingView(rootView: NotchIslandView(
+            store: store,
+            openAgent: { [weak self] agent in self?.openAgent(agent) },
+            openCommandCenter: { [weak self] in
+                self?.store.selectedSection = .overview
+                self?.openCommandCenter()
+            },
+            togglePower: { [weak self] in self?.store.toggleOutputPower() }
+        )))
+        notchDisplay.onPresentationChanged = { [weak self] in self?.refreshStatusItemVisibility() }
+
         if let button = statusItem.button {
             let displayLink = button.displayLink(
                 target: self,
@@ -97,9 +160,21 @@ private final class SidePulseMenuBarController: NSObject {
                 self?.refreshIconSource()
             }
         }
+        presentationObservation = NSApp.observe(\.currentSystemPresentationOptions, options: [.initial, .new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.presentationChanged() }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(workspaceApplicationChanged), name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(presentationChanged), name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(applicationBecameActive), name: NSApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(commandCenterClosed(_:)), name: NSWindow.willCloseNotification, object: nil)
         store.setSoftwareDisplayChangeHandler { [weak self] in
             self?.refreshIconSource()
         }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
     @objc private func displayLinkDidFire(_ displayLink: CADisplayLink) {
@@ -107,6 +182,16 @@ private final class SidePulseMenuBarController: NSObject {
     }
 
     @objc private func togglePopover(_ sender: NSStatusBarButton) {
+        let presentation = NSApp.currentSystemPresentationOptions
+        let justActivated = Date.now.timeIntervalSince(activatedAt) < 1
+        if presentation.contains(.fullScreen) || presentation.contains(.hideMenuBar)
+            || (justActivated && lastExternalPresentation.contains(.fullScreen)) {
+            activatedAt = .distantPast
+            lastExternalPresentation = []
+            store.selectedSection = .overview
+            openCommandCenter()
+            return
+        }
         if popover.isShown {
             popover.performClose(sender)
         } else {
@@ -116,6 +201,7 @@ private final class SidePulseMenuBarController: NSObject {
     }
 
     private func refreshIconSource() {
+        notchDisplay.setIslandContentHeight(NotchIslandView.contentHeight(agentCount: store.notchDrivingAgents.count))
         notchDisplay.update(
             enabled: store.notchEnabled,
             program: store.softwareDisplayProgram,
@@ -123,6 +209,7 @@ private final class SidePulseMenuBarController: NSObject {
             clockOrigin: store.softwareDisplayClockOrigin,
             brightness: store.notchBrightness
         )
+        refreshStatusItemVisibility()
         guard let button = statusItem.button else { return }
         let program = store.softwareDisplayProgram
         let ledCount = store.device.ledCount
@@ -143,6 +230,35 @@ private final class SidePulseMenuBarController: NSObject {
         }
     }
 
+    @objc private func workspaceApplicationChanged() {
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier {
+            activatedAt = .now
+        }
+        presentationChanged()
+    }
+
+    @objc private func presentationChanged() {
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            lastExternalPresentation = NSApp.currentSystemPresentationOptions
+        }
+        refreshStatusItemVisibility()
+    }
+
+    private func refreshStatusItemVisibility() {
+        let presentation = NSApp.currentSystemPresentationOptions
+        let autoHidden = !presentation.intersection([.fullScreen, .autoHideMenuBar, .hideMenuBar]).isEmpty
+        let visible = store.menuBarVisibilityMode.shouldShow(
+            notchPresented: notchDisplay.isPresented,
+            menuBarAutoHidden: autoHidden,
+            keepWhenAutoHidden: store.menuBarKeepWhenAutoHidden
+        )
+        guard lastRequestedVisibility != visible else { return }
+        lastRequestedVisibility = visible
+        if !visible { popover.performClose(nil) }
+        statusItem.isVisible = visible
+        renderIconFrame()
+    }
+
     private func renderIconFrame() {
         guard statusItem.isVisible else {
             displayLink?.isPaused = true
@@ -161,17 +277,48 @@ private final class SidePulseMenuBarController: NSObject {
 
     private func openCommandCenter() {
         popover.performClose(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        if let window = NSApp.windows.first(where: { $0.title == "Command Center" }) {
-            window.deminiaturize(nil)
-            window.makeKeyAndOrderFront(nil)
+        notchDisplay.collapse()
+        commandCenterRequested = true
+        if let window = commandCenterWindow {
+            focusCommandCenter(window)
+        } else if let createCommandCenter {
+            createCommandCenter()
         } else {
             NSApp.sendAction(Selector(("newWindow:")), to: nil, from: nil)
         }
     }
 
+    func registerCommandCenter(_ window: NSWindow) {
+        commandCenterWindow = window
+        if commandCenterRequested { focusCommandCenter(window) }
+    }
+
+    @objc private func commandCenterClosed(_ notification: Notification) {
+        if let window = notification.object as? NSWindow, window === commandCenterWindow {
+            commandCenterWindow = nil
+        }
+    }
+
+    private func focusCommandCenter(_ window: NSWindow) {
+        window.deminiaturize(nil)
+        // Keep the window in its Space and take the user to it, including when
+        // the click came from a different application's full-screen Space.
+        window.makeKeyAndOrderFront(nil)
+        NSRunningApplication.current.activate(options: [.activateAllWindows])
+        DispatchQueue.main.async { [weak self] in
+            self?.applicationBecameActive()
+        }
+    }
+
+    @objc private func applicationBecameActive() {
+        guard commandCenterRequested, NSApp.isActive, let window = commandCenterWindow else { return }
+        window.makeKeyAndOrderFront(nil)
+        commandCenterRequested = false
+    }
+
     private func openAgent(_ agent: AgentSession) {
         popover.performClose(nil)
+        notchDisplay.collapse()
         store.openAgent(agent)
     }
 }
@@ -191,7 +338,9 @@ struct SidePulseMenuBarView: View {
                     .foregroundStyle(.secondary)
             }
 
-            UtilityControlsView(store: store, compact: true)
+            UtilityControlsView(store: store, compact: true, openSettings: openCommandCenter)
+                .padding(3)
+                .glassEffect(.regular, in: .capsule)
 
             if let title = store.utilityStatusTitle {
                 VStack(alignment: .leading, spacing: 3) {
@@ -225,14 +374,22 @@ struct SidePulseMenuBarView: View {
 
             Divider()
 
-            Picker("Signal Mode", selection: Binding(
-                get: { store.agentDisplayMode },
-                set: { store.selectAgentDisplayMode($0) }
-            )) {
-                Text("Simple").tag(AgentDisplayMode.simple)
-                Text("Per Agent").tag(AgentDisplayMode.perAgent)
+            if store.displayedUtilityMode == .agents {
+                Picker("Signal Mode", selection: Binding(
+                    get: { store.agentDisplayMode },
+                    set: { store.selectAgentDisplayMode($0) }
+                )) {
+                    Text("Simple").tag(AgentDisplayMode.simple)
+                    Text("Per Agent").tag(AgentDisplayMode.perAgent)
+                }
+                .pickerStyle(.segmented)
+            } else {
+                Button("Agent lighting", systemImage: "arrow.uturn.backward") {
+                    store.selectUtilityMode(.agents)
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
             }
-            .pickerStyle(.segmented)
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {

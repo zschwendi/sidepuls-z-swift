@@ -19,3 +19,14 @@ LED renderer and saved lighting configuration.
 
 SidePulse Z is an independent community project. It is not affiliated with or
 endorsed by Peter Kuhar or InteliWEAR LLC.
+
+Closed-lid power API research was informed by William Gustafson's
+MIT-licensed Amphetamine Enhancer (CDMManager), Amphetamine Power Protect,
+and Apple's published XNU
+and PowerManagement sources. SidePulse's session guardian is an original
+implementation; no code from the proprietary Amphetamine app is included.
+
+https://github.com/x74353/Amphetamine-Enhancer
+https://github.com/x74353/Amphetamine-Power-Protect
+https://github.com/apple-oss-distributions/xnu
+https://github.com/apple-oss-distributions/PowerManagement

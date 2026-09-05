@@ -7,9 +7,18 @@ enum NotchDisplayGeometry {
     static let bandHeight: CGFloat = 5
 
     static func frame(screen: CGRect, notchDepth: CGFloat, notchWidth: CGFloat?) -> CGRect {
-        let width = min(screen.width, notchWidth.map { max(180, min(320, $0)) } ?? 220)
+        // NSScreen reports the cutout in the current display's logical points,
+        // including display scaling. Do not impose a model-specific minimum.
+        let width = min(screen.width, max(0, notchWidth ?? 220))
         let height = max(0, notchDepth) + bandHeight
         return CGRect(x: screen.midX - width / 2, y: screen.maxY - height, width: width, height: height)
+    }
+
+    static func expandedFrame(collapsed: CGRect, screen: CGRect, contentHeight: CGFloat) -> CGRect {
+        let width = min(400, screen.width)
+        let height = min(screen.height, collapsed.height + contentHeight + 22)
+        return CGRect(x: min(max(screen.minX, collapsed.midX - width / 2), screen.maxX - width),
+                      y: screen.maxY - height, width: width, height: height)
     }
 
     static func blendedColor(_ colors: [LEDProgramColor], x: CGFloat, width: CGFloat) -> LEDProgramColor {
@@ -33,6 +42,15 @@ enum NotchDisplayGeometry {
 final class NotchDisplayController: NSObject {
     private var panel: NSPanel?
     private var ledView: NotchLEDView?
+    private var containerView: NotchInteractionView?
+    private var islandView: NSView?
+    private var islandContentHeight: CGFloat = 200
+    private var closeTask: Task<Void, Never>?
+    private var targetFrame: CGRect?
+    private var transitionID = 0
+    private(set) var isExpanded = false
+    var isPresented: Bool { panel?.isVisible == true && !suspended }
+    var onPresentationChanged: (() -> Void)?
     private var enabled = false
     private var suspended = false
     private var program = "off"
@@ -52,6 +70,7 @@ final class NotchDisplayController: NSObject {
     }
 
     deinit {
+        closeTask?.cancel()
         NotificationCenter.default.removeObserver(self)
         NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
@@ -65,6 +84,50 @@ final class NotchDisplayController: NSObject {
         refresh()
     }
 
+    func setIslandContent(_ view: NSView, height: CGFloat = 200) {
+        islandView?.removeFromSuperview()
+        islandView = view
+        islandContentHeight = height
+        view.isHidden = !isExpanded
+        containerView?.islandView = view
+        containerView?.addSubview(view)
+        panel?.ignoresMouseEvents = false
+        refresh()
+    }
+
+    func setIslandContentHeight(_ height: CGFloat) {
+        guard islandContentHeight != height else { return }
+        islandContentHeight = height
+        refresh(animated: isExpanded)
+    }
+
+    func setExpanded(_ expanded: Bool, animated: Bool = true) {
+        guard islandView != nil, enabled, !suspended, brightness > 0 else { return }
+        guard isExpanded != expanded else { return }
+        isExpanded = expanded
+        closeTask?.cancel()
+        closeTask = nil
+        refresh(animated: animated)
+    }
+
+    func collapse() { setExpanded(false) }
+
+    private func pointerEntered() {
+        closeTask?.cancel()
+        closeTask = nil
+        setExpanded(true)
+    }
+
+    private func pointerExited() {
+        closeTask?.cancel()
+        closeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled, let self,
+                  self.panel?.frame.contains(NSEvent.mouseLocation) != true else { return }
+            self.setExpanded(false)
+        }
+    }
+
     @objc private func screenChanged() { refresh() }
     @objc private func suspend() {
         suspended = true
@@ -75,42 +138,169 @@ final class NotchDisplayController: NSObject {
         refresh()
     }
 
-    private func refresh() {
+    private func refresh(animated: Bool = false) {
         guard enabled, !suspended, brightness > 0,
               let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.screens.first
         else {
+            closeTask?.cancel()
+            closeTask = nil
+            isExpanded = false
+            transitionID += 1
+            islandView?.isHidden = true
+            containerView?.backdrop.isHidden = true
+            targetFrame = nil
             ledView?.stopAnimating()
             panel?.orderOut(nil)
+            onPresentationChanged?()
             return
         }
         if panel == nil {
-            let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            let panel = NotchOverlayPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             panel.isOpaque = false
             panel.backgroundColor = .clear
             panel.hasShadow = false
-            panel.ignoresMouseEvents = true
+            panel.ignoresMouseEvents = islandView == nil
+            panel.acceptsMouseMovedEvents = true
             panel.hidesOnDeactivate = false
             panel.level = .statusBar
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
             panel.isReleasedWhenClosed = false
             panel.title = "SidePulse Notch"
+            let container = NotchInteractionView(frame: .zero)
+            container.onEnter = { [weak self] in self?.pointerEntered() }
+            container.onExit = { [weak self] in self?.pointerExited() }
             let view = NotchLEDView(frame: .zero)
-            panel.contentView = view
+            container.ledView = view
+            container.addSubview(view)
+            if let islandView {
+                container.islandView = islandView
+                container.addSubview(islandView)
+            }
+            panel.contentView = container
             self.panel = panel
+            containerView = container
             ledView = view
         }
         let depth = screen.safeAreaInsets.top
         let width: CGFloat?
         if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea,
-           right.minX - left.maxX >= 120 {
+           right.minX > left.maxX {
             width = right.minX - left.maxX
         } else {
             width = nil
         }
-        let frame = NotchDisplayGeometry.frame(screen: screen.frame, notchDepth: depth, notchWidth: width)
-        if panel?.frame != frame { panel?.setFrame(frame, display: true) }
+        let collapsed = NotchDisplayGeometry.frame(screen: screen.frame, notchDepth: depth, notchWidth: width)
+        let frame = isExpanded
+            ? NotchDisplayGeometry.expandedFrame(collapsed: collapsed, screen: screen.frame, contentHeight: islandContentHeight)
+            : collapsed
+        containerView?.collapsedSize = collapsed.size
+        if targetFrame != frame {
+            targetFrame = frame
+            transitionID += 1
+            let transition = transitionID
+            if isExpanded {
+                // Keep the contents at their final size while the window reveals
+                // them. Reflowing every row during expansion makes it stutter.
+                containerView?.islandSize = CGSize(width: max(0, frame.width - 32),
+                                                   height: max(0, frame.height - collapsed.height - 22))
+                containerView?.isExpanded = true
+                if islandView?.isHidden == true {
+                    islandView?.alphaValue = 0
+                    containerView?.backdrop.alphaValue = 0
+                }
+                islandView?.isHidden = false
+                containerView?.backdrop.isHidden = false
+                panel?.hasShadow = true
+            }
+            if animated, panel?.isVisible == true, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = isExpanded ? 0.36 : 0.26
+                    context.timingFunction = isExpanded
+                        ? CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
+                        : CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1)
+                    panel?.animator().setFrame(frame, display: true)
+                    islandView?.animator().alphaValue = isExpanded ? 1 : 0
+                    containerView?.backdrop.animator().alphaValue = isExpanded ? 1 : 0
+                } completionHandler: { [weak self] in
+                    MainActor.assumeIsolated {
+                        self?.finishTransition(transition)
+                    }
+                }
+            } else {
+                panel?.setFrame(frame, display: true)
+                islandView?.alphaValue = isExpanded ? 1 : 0
+                containerView?.backdrop.alphaValue = isExpanded ? 1 : 0
+                finishTransition(transition)
+            }
+        }
+        containerView?.needsLayout = true
         if panel?.isVisible != true { panel?.orderFrontRegardless() }
+        onPresentationChanged?()
         ledView?.configure(program: program, ledCount: ledCount, clockOrigin: clockOrigin, brightness: brightness, hasNotch: depth > 0)
+    }
+
+    private func finishTransition(_ transition: Int) {
+        guard transitionID == transition else { return }
+        if !isExpanded {
+            islandView?.isHidden = true
+            containerView?.backdrop.isHidden = true
+            containerView?.isExpanded = false
+            panel?.hasShadow = false
+        }
+    }
+}
+
+@MainActor
+private final class NotchOverlayPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
+@MainActor
+private final class NotchInteractionView: NSView {
+    var onEnter: (() -> Void)?
+    var onExit: (() -> Void)?
+    weak var ledView: NSView?
+    weak var islandView: NSView?
+    let backdrop = NSView()
+    var collapsedSize: CGSize = .zero
+    var islandSize: CGSize = .zero
+    var isExpanded = false { didSet { needsLayout = true } }
+    private var hoverArea: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        backdrop.wantsLayer = true
+        backdrop.layer?.backgroundColor = NSColor.black.cgColor
+        backdrop.isHidden = true
+        addSubview(backdrop)
+    }
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+    override func mouseEntered(with event: NSEvent) { onEnter?() }
+    override func mouseExited(with event: NSEvent) { onExit?() }
+    override func mouseDown(with event: NSEvent) { onEnter?() }
+
+    override func layout() {
+        super.layout()
+        ledView?.frame = CGRect(x: (bounds.width - collapsedSize.width) / 2,
+                                y: bounds.height - collapsedSize.height,
+                                width: collapsedSize.width, height: collapsedSize.height)
+        islandView?.frame = CGRect(x: (bounds.width - islandSize.width) / 2,
+                                   y: bounds.height - collapsedSize.height - 8 - islandSize.height,
+                                   width: islandSize.width, height: islandSize.height)
+        backdrop.frame = bounds
+        layer?.cornerRadius = isExpanded ? 22 : 0
     }
 }
 

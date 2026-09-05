@@ -38,6 +38,16 @@ enum UtilityModesSmoke {
         UtilityPreferences.save(timerSettings, key: "timer", to: defaults)
         precondition(UtilityPreferences.load(TimerIndicatorSettings.self, key: "timer", default: TimerIndicatorSettings(), from: defaults) == timerSettings)
         let mic = MicrophoneIndicatorSettings()
+        precondition(mic.activeStyle.colorHex == "#FF9F0A" && mic.activeStyle.motion == .converge)
+        precondition(!mic.showsWhenIdle)
+        var oldMicrophone = mic
+        oldMicrophone.activeStyle = StateLightStyle(state: .working, colorHex: "#FF3B30", motion: .solid, cycleSeconds: 2, intensity: 0.8)
+        oldMicrophone.showsWhenIdle = true
+        precondition(oldMicrophone.upgradingLegacyAppearance.activeStyle == mic.activeStyle)
+        var customMicrophone = oldMicrophone
+        customMicrophone.activeStyle.colorHex = "#123456"
+        precondition(customMicrophone.upgradingLegacyAppearance.activeStyle == customMicrophone.activeStyle,
+                     "Upgrading the old default must preserve a customized microphone style")
         UtilityPreferences.save(mic, key: "microphone", to: defaults)
         precondition(UtilityPreferences.load(MicrophoneIndicatorSettings.self, key: "microphone", default: MicrophoneIndicatorSettings(), from: defaults) == mic)
         let progress = ProgressIndicatorSettings()

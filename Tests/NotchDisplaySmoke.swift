@@ -7,6 +7,18 @@ enum NotchDisplaySmoke {
         let screen = CGRect(x: -1728, y: 400, width: 1728, height: 1117)
         let notch = NotchDisplayGeometry.frame(screen: screen, notchDepth: 32, notchWidth: 200)
         precondition(notch == CGRect(x: -964, y: 1480, width: 200, height: 37))
+        // Live 14-inch MacBook Pro geometry at the user's scaled resolution:
+        // auxiliary areas end at x=593 and begin at x=759 (a 166pt cutout).
+        let compactScreen = CGRect(x: 0, y: 0, width: 1352, height: 878)
+        let compact = NotchDisplayGeometry.frame(screen: compactScreen, notchDepth: 29, notchWidth: 759 - 593)
+        precondition(compact == CGRect(x: 593, y: 844, width: 166, height: 34))
+        // The same physical cutout at another display scale must remain exact,
+        // even below the old 120pt detection threshold or above the old cap.
+        for width: CGFloat in [100, 166, 200, 360] {
+            let scaled = NotchDisplayGeometry.frame(screen: screen, notchDepth: 32, notchWidth: width)
+            precondition(scaled.width == width && scaled.midX == screen.midX)
+            precondition(scaled.maxY == screen.maxY)
+        }
         let flat = NotchDisplayGeometry.frame(screen: screen, notchDepth: 0, notchWidth: nil)
         precondition(flat.height == 5 && flat.maxY == screen.maxY && flat.midX == screen.midX)
         let narrow = NotchDisplayGeometry.frame(screen: CGRect(x: 0, y: 0, width: 150, height: 100), notchDepth: -1, notchWidth: 999)
@@ -50,6 +62,13 @@ enum NotchDisplaySmoke {
             let panel = NSApp.windows.first { $0.title == "SidePulse Notch" }!
             precondition(panel.isVisible && panel.ignoresMouseEvents && !panel.isKeyWindow)
             precondition(panel.level == .statusBar && panel.collectionBehavior.contains(.fullScreenAuxiliary))
+            if let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }),
+               let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea,
+               right.minX > left.maxX {
+                precondition(panel.frame.width == right.minX - left.maxX,
+                             "The overlay must use the actual display cutout width")
+                precondition(panel.frame.height == screen.safeAreaInsets.top + NotchDisplayGeometry.bandHeight)
+            }
             controller.update(enabled: true, program: "#FF00FF", ledCount: 8, clockOrigin: nil, brightness: 0)
             precondition(!panel.isVisible)
             controller.update(enabled: false, program: "#FF00FF", ledCount: 8, clockOrigin: nil, brightness: 1)

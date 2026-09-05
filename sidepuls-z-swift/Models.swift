@@ -289,6 +289,24 @@ struct AgentSession: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+enum NotchAgentSelection {
+    static func drivingAgents(agents: [AgentSession], mode: AgentDisplayMode, displayedAgentIDs: [String]) -> [AgentSession] {
+        switch mode {
+        case .simple:
+            let state = AgentDisplayPolicy.aggregateState(for: agents, mode: .simple)
+            guard state != .idle else { return [] }
+            return agents.filter { ($0.state == .toolRunning ? AgentState.working : $0.state) == state }
+                .sorted { $0.updatedAt == $1.updatedAt ? $0.id < $1.id : $0.updatedAt > $1.updatedAt }
+        case .perAgent:
+            let agentsByID = Dictionary(agents.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            var seen = Set<String>()
+            return displayedAgentIDs.compactMap { id in
+                seen.insert(id).inserted ? agentsByID[id] : nil
+            }
+        }
+    }
+}
+
 enum AgentOpenRouting {
     static func destination(for agent: AgentSession) -> URL? {
         agent.openURL ?? fallbackDestination(

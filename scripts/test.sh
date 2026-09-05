@@ -99,3 +99,52 @@ xcrun swiftc \
     Tests/AgentRuntimeSmoke.swift \
     -o "$test_dir/AgentRuntimeSmoke"
 "$test_dir/AgentRuntimeSmoke"
+
+xcrun swiftc \
+    sidepuls-z-swift/LEDProgramRenderer.swift \
+    sidepuls-z-swift/Models.swift \
+    sidepuls-z-swift/NearbySignalModels.swift \
+    sidepuls-z-swift/ProfileLibrary.swift \
+    sidepuls-z-swift/NotchDisplay.swift \
+    Tests/NotchInteractionSmoke.swift \
+    -o "$test_dir/NotchInteractionSmoke"
+"$test_dir/NotchInteractionSmoke"
+
+xcrun swiftc \
+    -default-isolation MainActor \
+    sidepuls-z-swift/ClosedLidSleepGuard.swift \
+    sidepuls-z-swift/CoffeePowerProtect.swift \
+    sidepuls-z-swift/CoffeePowerLease.swift \
+    sidepuls-z-swift/KeepAwakeController.swift \
+    Tests/KeepAwakeSmoke.swift \
+    -o "$test_dir/KeepAwakeSmoke"
+"$test_dir/KeepAwakeSmoke"
+
+xcrun swiftc \
+    sidepuls-z-swift/CoffeePowerLease.swift \
+    Tests/CoffeePowerLeaseSmoke.swift \
+    -o "$test_dir/CoffeePowerLeaseSmoke"
+"$test_dir/CoffeePowerLeaseSmoke"
+
+xcrun swiftc \
+    sidepuls-z-swift/LEDProgramRenderer.swift \
+    sidepuls-z-swift/Models.swift \
+    sidepuls-z-swift/LightingEngine.swift \
+    sidepuls-z-swift/OnAirIndicator.swift \
+    Tests/OnAirIndicatorSmoke.swift \
+    -o "$test_dir/OnAirIndicatorSmoke"
+"$test_dir/OnAirIndicatorSmoke"
+
+xcrun swiftc \
+    -default-isolation MainActor \
+    sidepuls-z-swift/ScreenCaptureActivityMonitor.swift \
+    Tests/ScreenCaptureActivityMonitorSmoke.swift \
+    -o "$test_dir/ScreenCaptureActivityMonitorSmoke"
+"$test_dir/ScreenCaptureActivityMonitorSmoke"
+
+xcrun swiftc \
+    -default-isolation MainActor \
+    sidepuls-z-swift/ClosedLidSleepGuard.swift \
+    Tests/ClosedLidSleepGuardSmoke.swift \
+    -o "$test_dir/ClosedLidSleepGuardSmoke"
+"$test_dir/ClosedLidSleepGuardSmoke"

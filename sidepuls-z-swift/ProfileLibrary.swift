@@ -161,12 +161,35 @@ enum ProfileLibrary {
     }
 }
 
+enum MenuBarVisibilityMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case always, whenNotchOff, never
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .always: "Always"
+        case .whenNotchOff: "When notch is off"
+        case .never: "Never"
+        }
+    }
+
+    func shouldShow(notchPresented: Bool, menuBarAutoHidden: Bool, keepWhenAutoHidden: Bool) -> Bool {
+        switch self {
+        case .always: true
+        case .never: false
+        case .whenNotchOff: !notchPresented || (menuBarAutoHidden && keepWhenAutoHidden)
+        }
+    }
+}
+
 enum AppPreferences {
     private static let liveOutputKey = "sidepulse.live-output-enabled.v1"
     private static let batteryIndicatorKey = "sidepulse.battery-indicator.v1"
     private static let agentDisplayModeKey = "sidepulse.agent-display-mode.v1"
     private static let menuBarIconStyleKey = "sidepulse.menu-bar-icon-style.v1"
+    private static let menuBarVisibilityKey = "sidepulse.menu-bar-visibility.v1"
+    private static let menuBarKeepWhenAutoHiddenKey = "sidepulse.menu-bar-keep-auto-hidden.v1"
     private static let notchEnabledKey = "sidepulse.notch-enabled.v1"
+    private static let keepAwakeEnabledKey = "sidepulse.keep-awake-enabled.v1"
     private static let notchBrightnessKey = "sidepulse.notch-brightness.v1"
     private static let universalBrightnessKey = "sidepulse.universal-brightness.v1"
     private static let flashlightModeKey = "sidepulse.flashlight-mode.v1"
@@ -242,8 +265,33 @@ enum AppPreferences {
         return max(0, min(1, defaults.double(forKey: universalBrightnessKey)))
     }
 
+    static func menuBarVisibilityMode(from defaults: UserDefaults = .standard) -> MenuBarVisibilityMode {
+        defaults.string(forKey: menuBarVisibilityKey).flatMap(MenuBarVisibilityMode.init(rawValue:)) ?? .whenNotchOff
+    }
+
+    static func saveMenuBarVisibilityMode(_ mode: MenuBarVisibilityMode, to defaults: UserDefaults = .standard) {
+        defaults.set(mode.rawValue, forKey: menuBarVisibilityKey)
+    }
+
+    static func menuBarKeepWhenAutoHidden(from defaults: UserDefaults = .standard) -> Bool {
+        guard defaults.object(forKey: menuBarKeepWhenAutoHiddenKey) != nil else { return true }
+        return defaults.bool(forKey: menuBarKeepWhenAutoHiddenKey)
+    }
+
+    static func saveMenuBarKeepWhenAutoHidden(_ enabled: Bool, to defaults: UserDefaults = .standard) {
+        defaults.set(enabled, forKey: menuBarKeepWhenAutoHiddenKey)
+    }
+
     static func notchEnabled(from defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: notchEnabledKey)
+    }
+
+    static func keepAwakeEnabled(from defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: keepAwakeEnabledKey)
+    }
+
+    static func saveKeepAwakeEnabled(_ enabled: Bool, to defaults: UserDefaults = .standard) {
+        defaults.set(enabled, forKey: keepAwakeEnabledKey)
     }
 
     static func saveNotchEnabled(_ enabled: Bool, to defaults: UserDefaults = .standard) {

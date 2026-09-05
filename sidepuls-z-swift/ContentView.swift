@@ -110,7 +110,7 @@ struct CommandCenterHero: View {
     }
 
     private var detail: String {
-        if store.utilityMode != .agents { return store.utilityStatusDetail }
+        if store.displayedUtilityMode != .agents { return store.utilityStatusDetail }
         if !store.device.connected {
             return "Plug in the device. SidePulse will detect it automatically and show you the exact hardware path."
         }
@@ -134,14 +134,33 @@ struct CommandCenterHero: View {
     }
 
     private var tint: Color {
-        if store.utilityMode != .agents { return .cyan }
-        if !store.device.connected || !store.outputPowerIsOn { return .orange }
-        if activeCount == 0 { return .cyan }
-        return .green
+        switch store.displayedUtilityMode {
+        case .agents:
+            if !store.device.connected || !store.outputPowerIsOn { return .orange }
+            if activeCount == 0 { return .cyan }
+            return .green
+        case .microphone:
+            return Color(hex: store.onAirStyle?.colorHex ?? "#FF9F0A")
+        case .timer:
+            switch store.timerState.phase {
+            case .running: return .purple
+            case .paused: return .orange
+            case .finished: return .green
+            case .idle: return .secondary
+            }
+        case .progress:
+            switch store.progressSnapshot.phase {
+            case .idle: return .secondary
+            case .running: return .cyan
+            case .completed: return .green
+            case .failed: return .red
+            case .cancelled: return .orange
+            }
+        }
     }
 
     private var statusLabel: String {
-        if store.utilityMode != .agents { return store.utilityMode.title.uppercased() }
+        if store.displayedUtilityMode != .agents { return store.displayedUtilityMode.title.uppercased() }
         if !store.device.connected || !store.outputPowerIsOn { return "ACTION NEEDED" }
         if activeCount == 0 { return "READY" }
         if store.agentDisplayMode == .simple, store.aggregateState == .completed { return "READY FOR YOU" }
@@ -149,11 +168,35 @@ struct CommandCenterHero: View {
         return "LIVE NOW"
     }
 
+    private var heroSymbol: String {
+        switch store.displayedUtilityMode {
+        case .agents:
+            activeCount > 0 ? "wave.3.right" : "sparkles"
+        case .microphone:
+            store.onAirSymbol
+        case .timer:
+            switch store.timerState.phase {
+            case .running: "timer"
+            case .paused: "pause.circle.fill"
+            case .finished: "checkmark.circle.fill"
+            case .idle: "timer"
+            }
+        case .progress:
+            switch store.progressSnapshot.phase {
+            case .idle: "circle"
+            case .running: "arrow.triangle.2.circlepath"
+            case .completed: "checkmark.circle.fill"
+            case .failed: "xmark.octagon.fill"
+            case .cancelled: "slash.circle"
+            }
+        }
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
             ZStack {
                 Circle().fill(tint.opacity(0.13))
-                Image(systemName: activeCount > 0 ? "wave.3.right" : "sparkles")
+                Image(systemName: heroSymbol)
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(tint)
             }
@@ -173,27 +216,29 @@ struct CommandCenterHero: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .trailing, spacing: 7) {
-                Picker("Signal Mode", selection: Binding(
-                    get: { store.agentDisplayMode },
-                    set: { store.selectAgentDisplayMode($0) }
-                )) {
-                    ForEach(AgentDisplayMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                if store.displayedUtilityMode == .agents {
+                    Picker("Signal Mode", selection: Binding(
+                        get: { store.agentDisplayMode },
+                        set: { store.selectAgentDisplayMode($0) }
+                    )) {
+                        ForEach(AgentDisplayMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 176)
                 }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(width: 176)
 
                 HStack(spacing: 7) {
                     primaryAction
-                if store.utilityMode == .agents, activeCount > 0, store.device.connected, store.outputPowerIsOn {
-                    Button("Tune signal", systemImage: "paintpalette.fill") {
-                        store.selectedState = store.aggregateState == .idle ? .working : store.aggregateState
-                        store.selectedSection = .lighting
+                    if store.displayedUtilityMode == .agents, activeCount > 0, store.device.connected, store.outputPowerIsOn {
+                        Button("Tune signal", systemImage: "paintpalette.fill") {
+                            store.selectedState = store.aggregateState == .idle ? .working : store.aggregateState
+                            store.selectedSection = .lighting
+                        }
+                        .buttonStyle(.glass)
                     }
-                    .buttonStyle(.glass)
-                }
                 }
             }
             .controlSize(.small)
@@ -204,7 +249,7 @@ struct CommandCenterHero: View {
 
     @ViewBuilder
     private var primaryAction: some View {
-        if store.utilityMode != .agents {
+        if store.displayedUtilityMode != .agents {
             Button("Agent lighting", systemImage: "cpu") { store.selectUtilityMode(.agents) }
                 .buttonStyle(.glass)
         } else if !store.device.connected {
@@ -361,34 +406,6 @@ struct SignalModeControl: View {
                 .pickerStyle(.menu)
             }
 
-            VStack(alignment: .leading, spacing: 7) {
-                Toggle("SidePulse Notch", isOn: Binding(
-                    get: { store.notchEnabled },
-                    set: { store.setNotchEnabled($0) }
-                ))
-                .font(.caption)
-                .toggleStyle(.switch)
-
-                Text("Mirror your LED display beneath the camera notch, or at the top center of a display without one.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if store.notchEnabled {
-                    HStack {
-                        Text("Notch brightness").font(.caption2)
-                        Slider(value: Binding(
-                            get: { store.notchBrightness },
-                            set: { store.setNotchBrightness($0) }
-                        ), in: 0...1)
-                        .accessibilityLabel("Notch brightness")
-                        Text("\(Int((store.notchBrightness * 100).rounded()))%")
-                            .font(.caption2.monospacedDigit())
-                            .frame(width: 34, alignment: .trailing)
-                    }
-                }
-            }
-
             Toggle("Start at login", isOn: Binding(
                 get: { store.launchAtLoginEnabled },
                 set: { store.setLaunchAtLoginEnabled($0) }
@@ -467,17 +484,18 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("Settings").font(.title2.bold())
-                Spacer()
-                Picker("Settings", selection: $selectedPane) {
-                    ForEach(SettingsPane.allCases) { pane in
-                        Text(pane.title).tag(pane)
-                    }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    Text("Settings").font(.title2.bold())
+                    Spacer(minLength: 8)
+                    settingsPanePicker
+                        .frame(width: 520)
                 }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(width: 520)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Settings").font(.title2.bold())
+                    settingsPanePicker
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
             Group {
@@ -509,6 +527,17 @@ struct SettingsView: View {
         .onAppear { openRequestedPane() }
         .onChange(of: store.showsModeSettings) { _, _ in openRequestedPane() }
     }
+
+    private var settingsPanePicker: some View {
+        Picker("Settings", selection: $selectedPane) {
+            ForEach(SettingsPane.allCases) { pane in
+                Text(pane.title).tag(pane)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+    }
+
     private func openRequestedPane() {
         if store.showsModeSettings {
             selectedPane = .modes
@@ -703,7 +732,7 @@ struct LEDDeckView: View {
                         Circle()
                             .fill(store.device.connected ? Color.green : Color.secondary)
                             .frame(width: 6, height: 6)
-                        Text(store.device.connected ? "LIVE DEVICE FEED" : store.utilityMode == .agents ? "DEVICE OFFLINE" : "SCREEN PREVIEW")
+                        Text(store.device.connected ? "LIVE DEVICE FEED" : store.displayedUtilityMode == .agents ? "DEVICE OFFLINE" : "SCREEN PREVIEW")
                     }
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
@@ -711,7 +740,7 @@ struct LEDDeckView: View {
 
                 HStack(alignment: .center, spacing: 28) {
                     DisplayLinkedLEDArray(
-                        program: store.utilityMode == .agents ? store.connectedSoftwareDisplayProgram : store.softwareDisplayProgram,
+                        program: store.displayedUtilityMode == .agents ? store.connectedSoftwareDisplayProgram : store.softwareDisplayProgram,
                         ledCount: store.device.ledCount,
                         clockOrigin: store.softwareDisplayClockOrigin,
                         style: .commandCenter
@@ -734,7 +763,7 @@ struct LEDDeckView: View {
                         }
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(store.utilityMode != .agents ? "\(store.utilityMode.title.uppercased()) · FULL ARRAY" : store.agentDisplayMode == .simple
+                        Text(store.displayedUtilityMode != .agents ? "\(store.displayedUtilityMode.title.uppercased()) · FULL ARRAY" : store.agentDisplayMode == .simple
                             ? "ONE SIGNAL · FULL ARRAY"
                             : "ASSIGNED SESSIONS · TOP TO BOTTOM")
                             .font(.caption2.weight(.bold))
@@ -1062,39 +1091,40 @@ struct LightingStudioView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
             ScrollView {
-                VStack(spacing: 12) {
-                    ForEach(AgentState.allCases.filter {
-                        store.agentDisplayMode == .perAgent || $0 != .toolRunning
-                    }) { state in
-                        StateStyleRow(
-                            style: store.selectedProfile.style(for: state),
-                            selected: !showsProgress && store.selectedState == state,
-                            action: { showsProgress = false; store.selectedState = state }
-                        )
-                    }
-                    Button {
-                        showsProgress = true
-                    } label: {
-                        HStack(spacing: 13) {
-                            Image(systemName: "chart.bar.fill")
-                                .foregroundStyle(.cyan)
-                                .frame(width: 18)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Progress").fontWeight(.semibold)
-                                Text("Tell me when it’s done")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("Agent states")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+
+                    VStack(spacing: 2) {
+                        ForEach(AgentState.allCases.filter {
+                            store.agentDisplayMode == .perAgent || $0 != .toolRunning
+                        }) { state in
+                            StateStyleRow(
+                                style: store.selectedProfile.style(for: state),
+                                selected: !showsProgress && store.selectedState == state,
+                                action: { showsProgress = false; store.selectedState = state }
+                            )
                         }
-                        .padding(14)
-                        .contentShape(.rect)
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(showsProgress ? .regular.tint(.cyan.opacity(0.18)) : .regular, in: .rect(cornerRadius: 18))
+
+                    Text("Utility")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.top, 4)
+
+                    ProgressStudioRow(
+                        selected: showsProgress,
+                        action: { showsProgress = true }
+                    )
                 }
+                .padding(10)
+                .frame(width: 232, alignment: .leading)
+                .glassEffect(.regular, in: .rect(cornerRadius: 22))
             }
-            .frame(width: 270)
+            .frame(width: 232)
 
             ScrollView {
                 if showsProgress {
@@ -1109,35 +1139,111 @@ struct LightingStudioView: View {
     }
 }
 
-struct StateStyleRow: View {
-    let style: StateLightStyle
+private struct StudioRowButtonStyle: ButtonStyle {
+    let tint: Color
+    let selected: Bool
+    let isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity, minHeight: 48, maxHeight: 52, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(fillColor(isPressed: configuration.isPressed))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(borderColor(isPressed: configuration.isPressed), lineWidth: selected ? 1.2 : 1)
+            }
+            .contentShape(Rectangle())
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+    }
+
+    private func fillColor(isPressed: Bool) -> Color {
+        if selected { return tint.opacity(isPressed ? 0.25 : isHovering ? 0.19 : 0.13) }
+        if isPressed { return Color.primary.opacity(0.14) }
+        if isHovering { return Color.primary.opacity(0.07) }
+        return .clear
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if selected { return tint.opacity(isPressed ? 0.9 : 0.66) }
+        return isHovering ? Color.primary.opacity(0.16) : .clear
+    }
+}
+
+private struct ProgressStudioRow: View {
     let selected: Bool
     let action: () -> Void
+    @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 13) {
-                Circle()
-                    .fill(Color(hex: style.colorHex))
-                    .shadow(color: Color(hex: style.colorHex), radius: 6)
-                    .frame(width: 18, height: 18)
+            HStack(spacing: 11) {
+                Image(systemName: "chart.bar.fill")
+                    .foregroundStyle(.cyan)
+                    .frame(width: 18)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(style.state.title).fontWeight(.semibold)
-                    Text("\(style.motion.title) · \(style.colorMode.title)")
+                    Text("Progress")
+                        .fontWeight(.semibold)
+                    Text("Tell me when it’s done")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                Image(systemName: selected ? "checkmark.circle.fill" : "chevron.right")
+                    .foregroundStyle(selected ? Color.cyan : Color.secondary.opacity(0.55))
             }
-            .padding(14)
-            .contentShape(.rect)
+            .padding(.horizontal, 10)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .glassEffect(
-            selected ? .regular.tint(Color(hex: style.colorHex).opacity(0.18)) : .regular,
-            in: .rect(cornerRadius: 18)
+        .buttonStyle(StudioRowButtonStyle(tint: .cyan, selected: selected, isHovering: isHovering))
+        .onHover { isHovering = $0 }
+        .accessibilityLabel("Progress")
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+    }
+}
+
+struct StateStyleRow: View {
+    let style: StateLightStyle
+    let selected: Bool
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 11) {
+                Circle()
+                    .fill(Color(hex: style.colorHex))
+                    .shadow(color: Color(hex: style.colorHex), radius: 5)
+                    .frame(width: 16, height: 16)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(style.state.title)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                    Text("\(style.motion.title) · \(style.colorMode.title)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: selected ? "checkmark.circle.fill" : "chevron.right")
+                    .foregroundStyle(selected ? Color(hex: style.colorHex) : Color.secondary.opacity(0.55))
+            }
+            .padding(.horizontal, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(
+            StudioRowButtonStyle(
+                tint: Color(hex: style.colorHex),
+                selected: selected,
+                isHovering: isHovering
+            )
         )
+        .onHover { isHovering = $0 }
+        .accessibilityValue(selected ? "Selected" : "Not selected")
     }
 }
 

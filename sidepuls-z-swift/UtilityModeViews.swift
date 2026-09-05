@@ -5,6 +5,7 @@ import SwiftUI
 struct UtilityControlsView: View {
     @Bindable var store: CommandCenterStore
     var compact = false
+    var openSettings: (() -> Void)? = nil
 
     @State private var timerPopoverPresented = false
 
@@ -21,13 +22,23 @@ struct UtilityControlsView: View {
             }
 
             utilityButton(
-                label: "Microphone",
+                label: "ON AIR",
                 symbol: microphoneSymbol,
                 active: store.utilityMode == .microphone,
                 activeColor: microphoneColor,
-                help: store.utilityMode == .microphone ? "Return from Microphone mode" : "Show microphone activity on the LEDs"
+                help: store.utilityMode == .microphone ? "Turn off ON AIR monitoring" : "Show microphone, screen recording and screenshot activity"
             ) {
                 store.toggleMicrophone()
+            }
+
+            utilityButton(
+                label: "Keep Awake",
+                symbol: store.keepAwakeEnabled ? "cup.and.saucer.fill" : "cup.and.saucer",
+                active: store.keepAwakeEnabled,
+                activeColor: keepAwakeTint,
+                help: keepAwakeHelp
+            ) {
+                store.toggleKeepAwake()
             }
 
             Button {
@@ -36,26 +47,25 @@ struct UtilityControlsView: View {
                 HStack(spacing: compact ? 4 : 6) {
                     Image(systemName: timerSymbol)
                         .font(.system(size: 13, weight: .semibold))
-                    if store.timerState.isActive {
-                        Text(store.timerLabel)
-                            .font(.caption2.monospacedDigit().weight(.semibold))
-                            .fixedSize()
-                    }
+                    Text(store.timerState.isActive ? store.timerLabel : "Timer")
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                        .frame(width: 48, alignment: .center)
                 }
                 .foregroundStyle(store.timerState.isActive ? Color.purple : Color.secondary)
                 .frame(minWidth: compact ? 27 : 30, minHeight: 28)
-                .padding(.horizontal, store.timerState.isActive ? 3 : 0)
-                .contentShape(.capsule)
+                .padding(.horizontal, 3)
+                .contentShape(.rect(cornerRadius: 8))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(UtilityToolbarButtonStyle(tint: .purple, active: store.timerState.isActive))
+            .id("utility.timer")
             .help(store.timerState.isActive ? "Timer \(store.timerLabel) — open controls" : "Open Timer")
             .accessibilityLabel("Timer")
             .accessibilityValue(store.timerState.isActive ? store.timerLabel : "Inactive")
             .accessibilityHint("Opens timer controls")
             .popover(isPresented: $timerPopoverPresented, arrowEdge: .bottom) {
-                TimerPopoverView(store: store)
-                    .frame(width: 330)
-                    .padding(18)
+                TimerPopoverView(store: store, openSettings: openSettings)
+                    .frame(width: 300)
+                    .padding(20)
             }
 
             utilityButton(
@@ -83,7 +93,7 @@ struct UtilityControlsView: View {
             }
         }
         .controlSize(.small)
-        .animation(.snappy(duration: 0.18), value: store.timerState.isActive)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var timerSymbol: String {
@@ -96,20 +106,21 @@ struct UtilityControlsView: View {
     }
 
     private var microphoneSymbol: String {
-        switch store.microphoneSnapshot.activity {
-        case .inUse: "mic.fill"
-        case .muted: "mic.slash.fill"
-        case .idle, .unavailable: "mic"
-        }
+        store.onAirSymbol
     }
 
     private var microphoneColor: Color {
-        switch store.microphoneSnapshot.activity {
-        case .inUse: .red
-        case .muted: .orange
-        case .idle: .green
-        case .unavailable: .secondary
-        }
+        Color(hex: store.onAirStyle?.colorHex ?? "#FF9F0A")
+    }
+
+    private var keepAwakeTint: Color {
+        Color(red: 0.96, green: 0.63, blue: 0.2)
+    }
+
+    private var keepAwakeHelp: String {
+        let status = store.keepAwakeStatus.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !status.isEmpty { return status }
+        return store.keepAwakeEnabled ? "Turn off Keep Awake" : "Turn on Keep Awake"
     }
 
     private func utilityButton(
@@ -125,129 +136,144 @@ struct UtilityControlsView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(active ? activeColor : Color.secondary)
                 .frame(width: 28, height: 28)
-                .background(active ? activeColor.opacity(0.14) : .clear, in: .circle)
-                .contentShape(.circle)
+                .contentShape(.rect(cornerRadius: 8))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(UtilityToolbarButtonStyle(tint: activeColor, active: active))
         .help(help)
         .accessibilityLabel(label)
         .accessibilityValue(active ? "On" : "Off")
+        .id("utility.\(label)")
     }
 }
 
 struct TimerPopoverView: View {
     @Bindable var store: CommandCenterStore
+    var openSettings: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var durationText = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Timer")
-                        .font(.title3.bold())
-                    Text(timerDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Label("Timer", systemImage: "timer")
+                    .font(.headline)
                 Spacer()
-                if store.timerState.isActive {
-                    Text(store.timerLabel)
-                        .font(.title2.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(timerColor)
-                        .accessibilityLabel("Time remaining")
+                Text(phaseTitle)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(timerColor)
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background(timerColor.opacity(0.1), in: .capsule)
+            }
+
+            VStack(spacing: 10) {
+                Text(store.timerState.isActive ? store.timerLabel : CountdownState.label(seconds: Double(store.timerSettings.durationSeconds)))
+                    .font(.system(size: 54, weight: .light, design: .rounded).monospacedDigit())
+                    .foregroundStyle(store.timerState.phase == .finished ? Color.green : Color.primary)
+                    .contentTransition(.numericText(countsDown: true))
+                    .accessibilityLabel("Time remaining")
+                    .accessibilityValue(store.timerState.isActive ? store.timerLabel : "Not started")
+                ProgressView(value: timerFraction)
+                    .tint(timerColor)
+                    .accessibilityLabel("Timer remaining")
+                Text(timerDetail)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+
+            if store.timerState.phase == .idle || store.timerState.phase == .finished {
+                HStack(spacing: 6) {
+                    ForEach([5, 15, 25], id: \.self) { minutes in
+                        Button("\(minutes) min") {
+                            store.updateTimerSettings { $0.durationSeconds = minutes * 60 }
+                            syncDurationText()
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(store.timerSettings.durationSeconds == minutes * 60 ? .purple : .secondary)
+                    }
+                    Spacer(minLength: 4)
+                    TextField("Minutes", text: $durationText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 44)
+                        .multilineTextAlignment(.trailing)
+                        .onSubmit(commitDuration)
+                        .accessibilityLabel("Timer duration in minutes")
+                    Text("min").font(.caption).foregroundStyle(.secondary)
                 }
             }
 
             HStack(spacing: 8) {
-                Text("Duration")
-                    .font(.subheadline.weight(.medium))
-                TextField("Minutes", text: $durationText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 82)
-                    .multilineTextAlignment(.trailing)
-                    .onSubmit(commitDuration)
-                    .accessibilityLabel("Timer duration in minutes")
-                Text("minutes")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-
-            HStack(spacing: 8) {
-                timerActionButton
-                Button("Reset", systemImage: "arrow.counterclockwise") {
-                    store.resetTimer()
-                    syncDurationText()
+                timerActionButton.frame(maxWidth: .infinity)
+                Button { store.resetTimer(); syncDurationText() } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .frame(width: 28, height: 20)
                 }
                 .buttonStyle(.glass)
                 .disabled(store.timerState.phase == .idle)
+                .help("Reset timer")
                 .accessibilityLabel("Reset timer")
-
-                Button("Show on LEDs", systemImage: "lightbulb.led.wide.fill") {
-                    commitDuration()
-                    store.selectUtilityMode(.timer)
-                    dismiss()
-                }
-                .buttonStyle(.glass)
-                .disabled(!store.timerState.isActive)
-                .accessibilityHint("Show the timer output on the SidePulse LEDs")
             }
+            .controlSize(.large)
 
+            Divider().opacity(0.5)
             HStack {
-                if store.utilityMode != .agents {
-                    ReturnToAgentLightingButton(store: store)
+                if store.timerState.isActive {
+                    Button(store.utilityMode == .timer ? "Agent lighting" : "Show on LEDs") {
+                        store.selectUtilityMode(store.utilityMode == .timer ? .agents : .timer)
+                        dismiss()
+                    }
+                    .buttonStyle(.borderless)
                 }
                 Spacer()
                 Button("Customize", systemImage: "slider.horizontal.3") {
-                    store.openUtilitySettings()
+                    commitDuration()
+                    store.openUtilitySettings(.timer)
                     dismiss()
+                    openSettings?()
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.borderless)
             }
-
-            if let error = store.utilityError {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            .font(.caption)
         }
         .onAppear(perform: syncDurationText)
-        .onChange(of: store.timerSettings.durationSeconds) { _, _ in
-            syncDurationText()
+        .onChange(of: store.timerSettings.durationSeconds) { _, _ in syncDurationText() }
+    }
+
+    private var phaseTitle: String {
+        switch store.timerState.phase {
+        case .idle: "Ready"
+        case .running: "Counting down"
+        case .paused: "Paused"
+        case .finished: "Finished"
         }
     }
 
-    @ViewBuilder
+    private var timerFraction: Double {
+        guard store.timerState.isActive, store.timerState.duration > 0 else { return 1 }
+        if store.timerState.phase == .finished { return 1 }
+        return min(1, max(0, store.timerRemaining / store.timerState.duration))
+    }
+
     private var timerActionButton: some View {
-        switch store.timerState.phase {
-        case .idle, .finished:
-            Button("Start", systemImage: "play.fill") {
-                commitDuration()
-                store.startTimer()
+        let title = store.timerState.phase == .running ? "Pause" : store.timerState.phase == .paused ? "Resume" : "Start timer"
+        return Button {
+            switch store.timerState.phase {
+            case .running: store.pauseTimer()
+            case .paused: store.resumeTimer()
+            case .idle, .finished: commitDuration(); store.startTimer()
             }
-            .buttonStyle(.glassProminent)
-            .accessibilityLabel("Start timer")
-        case .running:
-            Button("Pause", systemImage: "pause.fill") {
-                store.pauseTimer()
-            }
-            .buttonStyle(.glassProminent)
-            .accessibilityLabel("Pause timer")
-        case .paused:
-            Button("Resume", systemImage: "play.fill") {
-                store.resumeTimer()
-            }
-            .buttonStyle(.glassProminent)
-            .accessibilityLabel("Resume timer")
+        } label: {
+            Label(title, systemImage: store.timerState.phase == .running ? "pause.fill" : "play.fill")
+                .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.glassProminent)
+        .accessibilityLabel(store.timerState.phase == .running ? "Pause timer" : store.timerState.phase == .paused ? "Resume timer" : "Start timer")
     }
 
     private var timerDetail: String {
         switch store.timerState.phase {
         case .idle: "Ready to count down on SidePulse."
-        case .running: "Counting down; the timer continues if you switch modes."
+        case .running: "Keeps counting when you switch modes."
         case .paused: "Paused. Resume when you are ready."
         case .finished: "Finished. Start again or reset the timer."
         }
@@ -263,7 +289,7 @@ struct TimerPopoverView: View {
     }
 
     private func syncDurationText() {
-        durationText = String(format: "%.2g", Double(store.timerSettings.durationSeconds) / 60)
+        durationText = (Double(store.timerSettings.durationSeconds) / 60).formatted(.number.grouping(.never).precision(.fractionLength(0...3)).locale(Locale(identifier: "en_US_POSIX")))
     }
 
     private func commitDuration() {
@@ -282,116 +308,158 @@ struct TimerPopoverView: View {
 struct UtilitySettingsView: View {
     @Bindable var store: CommandCenterStore
 
+    private enum Page: String, CaseIterable {
+        case microphone, timer, notch, coffee
+        var title: String {
+            switch self { case .microphone: "ON AIR"; case .timer: "Timer"; case .notch: "Notch"; case .coffee: "Coffee" }
+        }
+        var symbol: String {
+            switch self { case .microphone: "mic.fill"; case .timer: "timer"; case .notch: "rectangle.topthird.inset.filled"; case .coffee: "cup.and.saucer.fill" }
+        }
+        var tint: Color {
+            switch self { case .microphone: .orange; case .timer: .purple; case .notch: .cyan; case .coffee: .orange }
+        }
+    }
+
+    private var page: Page { Page(rawValue: store.utilitySettingsPage) ?? .microphone }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Utility Modes")
-                            .font(.title2.bold())
-                        Text("Tune microphone, timer, and display indicators without changing agent lighting profiles.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Utility modes").font(.title2.bold())
+                Text("A look for every signal.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 6) {
+                ForEach(Page.allCases, id: \.self) { item in
+                    Button { store.utilitySettingsPage = item.rawValue } label: {
+                        Label(item.title, systemImage: item.symbol)
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity).padding(.vertical, 11)
+                            .contentShape(.rect(cornerRadius: 10))
                     }
-                    Spacer()
-                    if store.utilityMode != .agents {
-                        ReturnToAgentLightingButton(store: store)
-                    }
-                }
-
-                UtilitySettingsCard(
-                    title: "Microphone",
-                    symbol: "mic.fill",
-                    tint: .red,
-                    detail: microphoneSummary
-                ) {
-                    microphoneSettings
-                }
-
-                UtilitySettingsCard(
-                    title: "Timer",
-                    symbol: "timer",
-                    tint: .purple,
-                    detail: timerSummary
-                ) {
-                    timerSettings
-                }
-
-                UtilitySettingsCard(
-                    title: "SidePulse Notch",
-                    symbol: "rectangle.topthird.inset.filled",
-                    tint: .cyan,
-                    detail: "Mirror the active LED program beneath the camera notch or at the top center of a display."
-                ) {
-                    notchSettings
+                    .buttonStyle(UtilityToolbarButtonStyle(tint: item.tint, active: page == item))
+                    .accessibilityAddTraits(page == item ? .isSelected : [])
                 }
             }
-            .frame(maxWidth: 700, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, 22)
+            .padding(4)
+            .background(.primary.opacity(0.035), in: .rect(cornerRadius: 14))
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    switch page {
+                    case .microphone:
+                        UtilitySettingsCard(title: "ON AIR", symbol: page.symbol, tint: page.tint, detail: microphoneSummary) {
+                            microphoneSettings
+                        }
+                    case .timer:
+                        UtilitySettingsCard(title: "Timer", symbol: page.symbol, tint: page.tint, detail: timerSummary) {
+                            timerSettings
+                        }
+                    case .notch:
+                        UtilitySettingsCard(title: "SidePulse Notch", symbol: page.symbol, tint: page.tint,
+                            detail: "Your active lighting, just beneath the camera notch. It also works at the top of a display without one.") {
+                            notchSettings
+                        }
+                    case .coffee:
+                        UtilitySettingsCard(title: "Keep Awake", symbol: page.symbol, tint: page.tint,
+                            detail: "Keep your Mac working while SidePulse is running, even with the display off.") {
+                            Toggle("Coffee", isOn: Binding(
+                                get: { store.keepAwakeEnabled },
+                                set: { value in if value != store.keepAwakeEnabled { store.toggleKeepAwake() } }
+                            ))
+                            .toggleStyle(.switch)
+                            Text(store.keepAwakeStatus)
+                                .font(.subheadline).foregroundStyle(store.keepAwakeEnabled ? Color.orange : .secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if store.keepAwakeNeedsAuthorization {
+                                Button("Enable closed-lid protection…") {
+                                    store.authorizeClosedLidProtection()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.orange)
+                            }
+                            Text("Closed-lid protection needs macOS authentication once per SidePulse launch. Coffee restores normal sleep when turned off or when SidePulse exits. A sleep block already set by another app is preserved.")
+                                .font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(.bottom, 18)
+            }
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
+        .frame(maxWidth: 720, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var microphoneSummary: String {
-        let activity: String
-        switch store.microphoneSnapshot.activity {
-        case .inUse: activity = "In use"
-        case .muted: activity = "Hardware muted"
-        case .idle: activity = "Idle"
-        case .unavailable: activity = "Unavailable"
-        }
-        return "\(activity) · \(store.microphoneSnapshot.deviceName)"
+        guard store.utilityMode == .microphone else { return "A clear signal when your microphone or screen is being captured." }
+        return store.utilityStatusTitle ?? "Watching for activity · agent lighting"
     }
 
     private var timerSummary: String {
         let duration = CountdownState.label(seconds: Double(store.timerSettings.durationSeconds))
-        return store.timerState.isActive ? "\(store.timerLabel) remaining · \(duration) configured" : "\(duration) configured"
+        if store.timerState.phase == .finished { return "Finished · \(duration) timer" }
+        return store.timerState.isActive ? "\(store.timerLabel) remaining" : "\(duration) · ready when you are"
     }
 
     private var microphoneSettings: some View {
         VStack(alignment: .leading, spacing: 13) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: microphoneStatusSymbol)
-                    .foregroundStyle(microphoneStatusColor)
-                    .frame(width: 22)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(microphoneStatusTitle)
-                        .font(.subheadline.weight(.semibold))
-                    Text(store.microphoneSnapshot.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 12) {
+                if store.utilityMode == .microphone {
+                    Label(microphoneStatusTitle, systemImage: microphoneStatusSymbol)
+                        .font(.subheadline.weight(.medium)).foregroundStyle(microphoneStatusColor)
+                } else {
+                    Label("Indicator off", systemImage: "mic")
+                        .font(.subheadline).foregroundStyle(.secondary)
                 }
+                Spacer()
+                Toggle("ON AIR mode", isOn: Binding(
+                    get: { store.utilityMode == .microphone },
+                    set: { store.selectUtilityMode($0 ? .microphone : .agents) }
+                ))
+                .labelsHidden().toggleStyle(.switch)
+            }
+            if store.utilityMode == .microphone {
+                Text(store.utilityStatusDetail)
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
-            Toggle("Show an idle microphone state", isOn: Binding(
-                get: { store.microphoneSettings.showsWhenIdle },
-                set: { value in store.updateMicrophoneSettings { $0.showsWhenIdle = value } }
-            ))
-            .toggleStyle(.switch)
-            .font(.subheadline)
-
-            Text("SidePulse reports in-use, hardware-muted, idle, or unavailable. This indicator does not mute the app or microphone.")
+            Text("Orange moves inward while your mic or macOS Screenshot recording is active. Saved screenshots get a quick white sweep. Your agents show between captures. Each signal has its own editable look.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            UtilityStyleEditor(
-                title: "In use",
-                style: microphoneStyleBinding(\.activeStyle),
-                preview: { store.previewUtilityStyle(store.microphoneSettings.activeStyle) }
-            )
-            UtilityStyleEditor(
-                title: "Hardware muted",
-                style: microphoneStyleBinding(\.mutedStyle),
-                preview: { store.previewUtilityStyle(store.microphoneSettings.mutedStyle) }
-            )
-            UtilityStyleEditor(
-                title: "Idle",
-                style: microphoneStyleBinding(\.idleStyle),
-                preview: { store.previewUtilityStyle(store.microphoneSettings.idleStyle) }
-            )
+            UtilityStyleSelector(options: [
+                UtilityStyleOption("Microphone", style: microphoneStyleBinding(\.activeStyle)),
+                UtilityStyleOption("Hardware muted", style: microphoneStyleBinding(\.mutedStyle))
+            ], preview: store.previewUtilityStyle)
+
+            Divider().padding(.vertical, 3)
+            Toggle("Screen recording", isOn: Binding(
+                get: { store.captureSettings.screenRecordingEnabled },
+                set: { value in store.updateCaptureSettings { $0.screenRecordingEnabled = value } }
+            ))
+            Toggle("Screenshots", isOn: Binding(
+                get: { store.captureSettings.screenshotEnabled },
+                set: { value in store.updateCaptureSettings { $0.screenshotEnabled = value } }
+            ))
+            UtilityStyleSelector(options: [
+                UtilityStyleOption("Screen recording", style: captureStyleBinding(\.recordingStyle)),
+                UtilityStyleOption("Screenshot", style: captureStyleBinding(\.screenshotStyle))
+            ], preview: store.previewUtilityStyle)
+            if store.utilityMode == .microphone, !store.captureSnapshot.isAvailable {
+                Text(store.captureSnapshot.detail)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Enable recording detection…", action: store.enableScreenRecordingDetection)
+                    .buttonStyle(.bordered)
+            }
+            Text("Recording detection covers the macOS Screenshot app. Screenshot flashes follow newly saved files after Spotlight indexes them; clipboard-only screenshots aren’t reported.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -443,21 +511,11 @@ struct UtilitySettingsView: View {
             }
             .pickerStyle(.segmented)
 
-            UtilityStyleEditor(
-                title: "Running",
-                style: timerStyleBinding(\.runningStyle),
-                preview: { store.previewUtilityStyle(store.timerSettings.runningStyle) }
-            )
-            UtilityStyleEditor(
-                title: "Warning",
-                style: timerStyleBinding(\.warningStyle),
-                preview: { store.previewUtilityStyle(store.timerSettings.warningStyle) }
-            )
-            UtilityStyleEditor(
-                title: "Finished",
-                style: timerStyleBinding(\.finishedStyle),
-                preview: { store.previewUtilityStyle(store.timerSettings.finishedStyle) }
-            )
+            UtilityStyleSelector(options: [
+                UtilityStyleOption("Running", style: timerStyleBinding(\.runningStyle)),
+                UtilityStyleOption("Warning", style: timerStyleBinding(\.warningStyle)),
+                UtilityStyleOption("Finished", style: timerStyleBinding(\.finishedStyle))
+            ], preview: store.previewUtilityStyle)
         }
     }
 
@@ -482,34 +540,48 @@ struct UtilitySettingsView: View {
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .frame(width: 38, alignment: .trailing)
             }
+            Text("Hover over the notch for agents and quick controls.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            Divider().padding(.vertical, 4)
+            Picker("Menu bar icon", selection: Binding(
+                get: { store.menuBarVisibilityMode },
+                set: { store.setMenuBarVisibilityMode($0) }
+            )) {
+                ForEach(MenuBarVisibilityMode.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.menu)
+
+            if store.menuBarVisibilityMode == .whenNotchOff {
+                Toggle("Keep available in full screen", isOn: Binding(
+                    get: { store.menuBarKeepWhenAutoHidden },
+                    set: { store.setMenuBarKeepWhenAutoHidden($0) }
+                ))
+                .toggleStyle(.switch)
+                Text("Also keeps the icon when the menu bar auto-hides. Move to the top of the screen to reveal it.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
     private var microphoneStatusTitle: String {
-        switch store.microphoneSnapshot.activity {
-        case .inUse: "Microphone in use"
-        case .muted: "Microphone hardware muted"
-        case .idle: "Microphone idle"
-        case .unavailable: "Microphone unavailable"
-        }
+        store.utilityStatusTitle ?? "Watching for activity · agent lighting"
     }
 
     private var microphoneStatusSymbol: String {
-        switch store.microphoneSnapshot.activity {
-        case .inUse: "mic.fill"
-        case .muted: "mic.slash.fill"
-        case .idle: "mic"
-        case .unavailable: "mic.slash"
-        }
+        store.onAirSymbol
     }
 
     private var microphoneStatusColor: Color {
-        switch store.microphoneSnapshot.activity {
-        case .inUse: .red
-        case .muted: .orange
-        case .idle: .green
-        case .unavailable: .secondary
-        }
+        Color(hex: store.onAirStyle?.colorHex ?? "#FF9F0A")
+    }
+
+    private func captureStyleBinding(_ keyPath: WritableKeyPath<CaptureIndicatorSettings, StateLightStyle>) -> Binding<StateLightStyle> {
+        Binding(
+            get: { store.captureSettings[keyPath: keyPath] },
+            set: { value in store.updateCaptureSettings { $0[keyPath: keyPath] = value } }
+        )
     }
 
     private func microphoneStyleBinding(_ keyPath: WritableKeyPath<MicrophoneIndicatorSettings, StateLightStyle>) -> Binding<StateLightStyle> {
@@ -527,291 +599,197 @@ struct UtilitySettingsView: View {
     }
 }
 
-struct UtilityStyleEditor: View {
-    let title: String
-    @Binding var style: StateLightStyle
-    let preview: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(previewColors.first ?? .white)
-                    .frame(width: 26, height: 16)
-                    .shadow(color: previewColors.first ?? .clear, radius: 4)
-                Button("Preview", systemImage: "play.fill", action: preview)
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
-                    .accessibilityLabel("Preview \(title) style on SidePulse")
-            }
-
-            Picker("Color behavior", selection: $style.colorMode) {
-                ForEach(LightColorMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            .pickerStyle(.menu)
-            .accessibilityLabel("\(title) color behavior")
-
-            if style.colorMode != .rainbow {
-                ColorPicker(
-                    style.colorMode == .single ? "Color" : "First color",
-                    selection: Binding(
-                        get: { Color(hex: style.colorHex) },
-                        set: { style.colorHex = $0.hexString }
-                    )
-                )
-                if style.colorMode != .single {
-                    ColorPicker(
-                        "Second color",
-                        selection: Binding(
-                            get: { Color(hex: style.secondaryColorHex) },
-                            set: { style.secondaryColorHex = $0.hexString }
-                        )
-                    )
-                }
-            } else {
-                HStack(spacing: 7) {
-                    ForEach(Array(previewColors.enumerated()), id: \.offset) { _, color in
-                        Circle().fill(color).frame(width: 16, height: 16)
-                    }
-                    Text("Spectrum generated automatically")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Picker("Motion", selection: $style.motion) {
-                ForEach(LightMotion.allCases) { motion in
-                    Text(motion.title).tag(motion)
-                }
-            }
-            .pickerStyle(.menu)
-            .accessibilityLabel("\(title) motion")
-
-            HStack(spacing: 9) {
-                Text("Intensity")
-                    .font(.caption)
-                Slider(value: $style.intensity, in: 0...1, step: 0.01)
-                    .accessibilityLabel("\(title) intensity")
-                Text("\(Int((style.intensity * 100).rounded()))%")
-                    .font(.caption.monospacedDigit())
-                    .frame(width: 38, alignment: .trailing)
-            }
-
-            if style.motion.isAnimated || style.colorMode == .rotatingColorway {
-                HStack(spacing: 9) {
-                    Text("Cycle")
-                        .font(.caption)
-                    Slider(value: $style.cycleSeconds, in: 0.2...12, step: 0.1)
-                        .accessibilityLabel("\(title) cycle speed")
-                    Text("\(style.cycleSeconds.formatted(.number.precision(.fractionLength(0...1))))s")
-                        .font(.caption.monospacedDigit())
-                        .frame(width: 38, alignment: .trailing)
-                }
-            }
-        }
-        .padding(12)
-        .glassEffect(.regular, in: .rect(cornerRadius: 15))
-    }
-
-    private var previewColors: [Color] {
-        switch style.colorMode {
-        case .single:
-            [Color(hex: style.colorHex), Color(hex: style.colorHex)]
-        case .colorway:
-            [Color(hex: style.colorHex), Color(hex: style.secondaryColorHex)]
-        case .rainbow:
-            [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .pink]
-        case .rotatingColorway:
-            [Color(hex: style.colorHex), Color(hex: style.secondaryColorHex), Color(hex: style.colorHex)]
-        }
-    }
-}
-
 struct ProgressModeStudioView: View {
     @Bindable var store: CommandCenterStore
 
+    private enum Source: String, CaseIterable {
+        case command = "Run a command"
+        case process = "Watch a process"
+    }
+    @State private var source: Source = .command
+    @State private var showsCustomization = false
+    @State private var showsTaskDetails = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Progress")
-                        .font(.title2.bold())
-                    Text("Run a command or watch an existing process and show its progress on SidePulse.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if store.utilityMode != .agents {
-                    ReturnToAgentLightingButton(store: store)
-                }
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Progress")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                Text("Tell me when it’s done.")
+                    .font(.subheadline).foregroundStyle(.secondary)
             }
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Run a task")
-                    .font(.headline)
-                TextField("Command", text: $store.progressCommand, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...3)
-                    .accessibilityLabel("Progress command")
-                HStack(spacing: 9) {
-                    TextField("Working directory", text: $store.progressDirectory)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityLabel("Progress working directory")
-                    Button("Choose…", systemImage: "folder") {
-                        store.chooseProgressDirectory()
-                    }
-                    .buttonStyle(.glass)
-                }
-                Button("Run & Watch", systemImage: "play.fill") {
-                    store.runProgressCommand()
-                }
-                .buttonStyle(.glassProminent)
-                .disabled(store.progressSnapshot.phase == .running || store.progressCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityHint("Runs the command in the selected directory and watches it")
-            }
-            .padding(16)
-            .glassEffect(.regular.tint(.cyan.opacity(0.06)), in: .rect(cornerRadius: 18))
+            if store.progressSnapshot.phase != .idle { progressStatus }
 
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Watch a process")
-                        .font(.headline)
-                    Spacer()
-                    Text("Optional")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+            if store.progressSnapshot.phase == .running {
+                DisclosureGroup("Task details", isExpanded: $showsTaskDetails) {
+                    taskSource.padding(.top, 12)
                 }
-                HStack(spacing: 9) {
-                    TextField("PID", text: $store.progressPID)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 120)
-                        .accessibilityLabel("Process ID to watch")
-                    Button("Watch PID", systemImage: "eye.fill") {
-                        store.watchProgressProcess()
-                    }
-                    .buttonStyle(.glass)
-                    .disabled(store.progressSnapshot.phase == .running)
-                }
+                .font(.subheadline.weight(.medium))
+            } else {
+                taskSource
             }
-            .padding(16)
-            .glassEffect(.regular, in: .rect(cornerRadius: 18))
-
-            progressStatus
-            progressCustomization
 
             if let error = store.utilityError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            Divider().opacity(0.5)
+            DisclosureGroup(isExpanded: $showsCustomization) {
+                progressCustomization.padding(.top, 14)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "slider.horizontal.3").foregroundStyle(.secondary)
+                    Text("Lighting").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    HStack(spacing: 4) {
+                        ForEach([store.progressSettings.runningStyle.colorHex, store.progressSettings.completedStyle.colorHex, store.progressSettings.failedStyle.colorHex].indices, id: \.self) { index in
+                            let colors = [store.progressSettings.runningStyle.colorHex, store.progressSettings.completedStyle.colorHex, store.progressSettings.failedStyle.colorHex]
+                            Circle().fill(Color(hex: colors[index])).frame(width: 8, height: 8)
+                        }
+                    }
+                }
+            }
+            .tint(.secondary)
         }
-        .padding(20)
+        .padding(2)
+        .padding(.bottom, 20)
     }
 
-    @ViewBuilder
-    private var progressStatus: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack {
-                Label(progressPhaseTitle, systemImage: progressPhaseSymbol)
-                    .font(.headline)
-                    .foregroundStyle(progressPhaseColor)
-                Spacer()
-                if store.progressSnapshot.phase != .idle {
-                    Text(store.progressSnapshot.title)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+    private var taskSource: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("Task source", selection: $source) {
+                ForEach(Source.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .labelsHidden().pickerStyle(.segmented)
+
+            if source == .command {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("COMMAND").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    TextField("Command to run", text: $store.progressCommand, axis: .vertical)
+                        .font(.system(.body, design: .monospaced))
+                        .textFieldStyle(.roundedBorder).lineLimit(2...4)
+                        .accessibilityLabel("Progress command")
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder").foregroundStyle(.secondary)
+                        TextField("Working directory", text: $store.progressDirectory)
+                            .textFieldStyle(.plain).font(.caption)
+                            .accessibilityLabel("Progress working directory")
+                        Button("Choose…") { store.chooseProgressDirectory() }
+                            .buttonStyle(.borderless).font(.caption)
+                    }
+                    .padding(9)
+                    .background(.primary.opacity(0.035), in: .rect(cornerRadius: 8))
                 }
+                Button { store.runProgressCommand() } label: {
+                    Label("Run & Watch", systemImage: "play.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent).controlSize(.large)
+                .disabled(store.progressSnapshot.phase == .running || store.progressCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityHint("Runs the command in the selected directory and watches it")
+            } else {
+                Text("Follow a process that’s already running.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    TextField("Process ID", text: $store.progressPID)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .accessibilityLabel("Process ID to watch")
+                    Button("Watch", systemImage: "eye") { store.watchProgressProcess() }
+                        .buttonStyle(.glassProminent)
+                        .disabled(store.progressSnapshot.phase == .running)
+                }
+                Text("Stopping a watch leaves the process running.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-
-            if let fraction = store.progressSnapshot.fraction, fraction.isFinite {
-                ProgressView(value: min(1, max(0, fraction)))
-                    .tint(progressPhaseColor)
-                    .accessibilityLabel("Progress")
-                    .accessibilityValue("\(Int((fraction * 100).rounded())) percent")
-            }
-
-            if !store.progressSnapshot.detail.isEmpty {
-                Text(store.progressSnapshot.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if store.progressSnapshot.phase == .idle {
+                Text("Your lights show activity, then signal when the task finishes.")
+                    .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let exitCode = store.progressSnapshot.exitCode {
-                Text("Exit code \(exitCode)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 8) {
-                if store.progressSnapshot.phase == .running {
-                    Button("Cancel", systemImage: "xmark.circle") {
-                        store.cancelProgress()
-                    }
-                    .buttonStyle(.glass)
-                }
-                if store.utilityMode != .progress && [.running, .completed, .failed].contains(store.progressSnapshot.phase) {
-                    Button("Show on LEDs", systemImage: "lightbulb.led.wide.fill") {
-                        store.selectUtilityMode(.progress)
-                    }
-                    .buttonStyle(.glass)
-                }
-                if store.progressSnapshot.logURL != nil {
-                    Button("Open Log", systemImage: "doc.text.magnifyingglass") {
-                        store.openProgressLog()
-                    }
-                    .buttonStyle(.glass)
-                }
-                Button("Clear", systemImage: "trash") {
-                    store.clearProgress()
-                }
-                .buttonStyle(.glass)
-                .disabled(store.progressSnapshot.phase == .idle || store.progressSnapshot.phase == .running)
             }
         }
         .padding(16)
-        .glassEffect(.regular.tint(progressPhaseColor.opacity(0.06)), in: .rect(cornerRadius: 18))
+        .background(.primary.opacity(0.025), in: .rect(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.primary.opacity(0.065)))
+    }
+
+    private var progressStatus: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: progressPhaseSymbol)
+                    .font(.title2).foregroundStyle(progressPhaseColor)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(progressPhaseTitle).font(.headline)
+                    Text(store.progressSnapshot.title)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary).lineLimit(2)
+                }
+                Spacer(minLength: 0)
+                if store.progressSnapshot.phase == .running, let fraction = store.progressSnapshot.fraction {
+                    Text("\(Int((min(1, max(0, fraction)) * 100).rounded()))%")
+                        .font(.title3.monospacedDigit().weight(.semibold))
+                }
+            }
+            if store.progressSnapshot.phase == .running {
+                if let fraction = store.progressSnapshot.fraction {
+                    ProgressView(value: min(1, max(0, fraction)))
+                        .tint(progressPhaseColor).accessibilityLabel("Progress")
+                } else {
+                    HStack(spacing: 7) {
+                        ProgressView().controlSize(.mini)
+                        Text("Watching for completion…").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Text(store.progressSnapshot.detail)
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                if store.progressSnapshot.phase == .running {
+                    Button(store.progressSnapshot.logURL == nil ? "Stop watching" : "Cancel task", systemImage: "stop.fill") {
+                        store.cancelProgress()
+                    }.buttonStyle(.glass)
+                } else {
+                    Button("Clear") { store.clearProgress() }.buttonStyle(.glass)
+                }
+                if store.progressSnapshot.logURL != nil {
+                    Button("Open Log", systemImage: "doc.text") { store.openProgressLog() }
+                        .buttonStyle(.borderless)
+                }
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
+
+            if [.running, .completed, .failed].contains(store.progressSnapshot.phase) {
+                Button(store.utilityMode == .progress ? "Return to agent lighting" : "Show on LEDs", systemImage: store.utilityMode == .progress ? "arrow.uturn.backward" : "lightbulb.led.wide.fill") {
+                    store.selectUtilityMode(store.utilityMode == .progress ? .agents : .progress)
+                }
+                .buttonStyle(.borderless).font(.caption)
+            }
+        }
+        .padding(16)
+        .background(progressPhaseColor.opacity(0.07), in: .rect(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(progressPhaseColor.opacity(0.18)))
     }
 
     private var progressCustomization: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("LED customization")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 14) {
             Picker("LED output", selection: Binding(
                 get: { store.progressSettings.gaugeMode },
                 set: { mode in store.updateProgressSettings { $0.gaugeMode = mode } }
             )) {
-                ForEach(UtilityGaugeMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
+                ForEach(UtilityGaugeMode.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
-
-            UtilityStyleEditor(
-                title: "Running",
-                style: progressStyleBinding(\.runningStyle),
-                preview: { store.previewUtilityStyle(store.progressSettings.runningStyle) }
-            )
-            UtilityStyleEditor(
-                title: "Completed",
-                style: progressStyleBinding(\.completedStyle),
-                preview: { store.previewUtilityStyle(store.progressSettings.completedStyle) }
-            )
-            UtilityStyleEditor(
-                title: "Failed",
-                style: progressStyleBinding(\.failedStyle),
-                preview: { store.previewUtilityStyle(store.progressSettings.failedStyle) }
-            )
+            UtilityStyleSelector(options: [
+                UtilityStyleOption("Running", style: progressStyleBinding(\.runningStyle)),
+                UtilityStyleOption("Completed", style: progressStyleBinding(\.completedStyle)),
+                UtilityStyleOption("Failed", style: progressStyleBinding(\.failedStyle))
+            ], preview: store.previewUtilityStyle)
         }
-        .padding(16)
-        .glassEffect(.regular.tint(.cyan.opacity(0.04)), in: .rect(cornerRadius: 18))
     }
 
     private var progressPhaseTitle: String {
@@ -879,7 +857,8 @@ private struct UtilitySettingsCard<Content: View>: View {
             content()
         }
         .padding(18)
-        .glassEffect(.regular.tint(tint.opacity(0.045)), in: .rect(cornerRadius: 22))
+        .background(.primary.opacity(0.025), in: .rect(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.primary.opacity(0.06)))
     }
 }
 
@@ -887,10 +866,40 @@ private struct ReturnToAgentLightingButton: View {
     @Bindable var store: CommandCenterStore
 
     var body: some View {
-        Button("Return to Agent Lighting", systemImage: "arrow.uturn.backward") {
+        Button("Agent lighting", systemImage: "arrow.uturn.backward") {
             store.selectUtilityMode(.agents)
         }
         .buttonStyle(.glass)
         .accessibilityHint("Stops the utility LED output and restores agent lighting")
+    }
+}
+
+private struct UtilityToolbarButtonStyle: ButtonStyle {
+    var tint: Color
+    var active: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        Surface(configuration: configuration, tint: tint, active: active)
+    }
+
+    private struct Surface: View {
+        let configuration: Configuration
+        let tint: Color
+        let active: Bool
+        @State private var hovered = false
+        @Environment(\.isEnabled) private var enabled
+
+        var body: some View {
+            configuration.label
+                .background {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(active ? tint.opacity(configuration.isPressed ? 0.3 : hovered ? 0.22 : 0.13) : Color.primary.opacity(configuration.isPressed ? 0.12 : hovered ? 0.065 : 0))
+                }
+                .contentShape(.rect(cornerRadius: 8))
+                .opacity(enabled ? 1 : 0.4)
+                .onHover { hovered = $0 }
+                .animation(.easeOut(duration: 0.12), value: hovered)
+                .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+        }
     }
 }

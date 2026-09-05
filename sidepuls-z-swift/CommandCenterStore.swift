@@ -67,10 +67,18 @@ final class CommandCenterStore {
     var batterySettings = AppPreferences.batteryIndicatorSettings()
     var agentDisplayMode = AppPreferences.agentDisplayMode()
     var menuBarIconStyle = AppPreferences.menuBarIconStyle()
+    var menuBarVisibilityMode = AppPreferences.menuBarVisibilityMode()
+    var menuBarKeepWhenAutoHidden = AppPreferences.menuBarKeepWhenAutoHidden()
     var notchEnabled = AppPreferences.notchEnabled()
+    var keepAwakeEnabled = false
+    var keepAwakeNeedsAuthorization = false
+    var keepAwakeStatus = "Keep the Mac awake while SidePulse is running"
     var notchBrightness = AppPreferences.notchBrightness()
     var utilityMode = UtilityOutputMode.agents
-    var microphoneSettings = UtilityPreferences.load(MicrophoneIndicatorSettings.self, key: "microphone", default: MicrophoneIndicatorSettings())
+    var microphoneSettings = UtilityPreferences.load(MicrophoneIndicatorSettings.self, key: "microphone", default: MicrophoneIndicatorSettings()).upgradingLegacyAppearance
+    var captureSettings = UtilityPreferences.load(CaptureIndicatorSettings.self, key: "capture", default: CaptureIndicatorSettings())
+    var captureSnapshot = ScreenCaptureSnapshot.unavailable
+    var screenshotActive = false
     var timerSettings = UtilityPreferences.load(TimerIndicatorSettings.self, key: "timer", default: TimerIndicatorSettings()).normalized
     var progressSettings = UtilityPreferences.load(ProgressIndicatorSettings.self, key: "progress", default: ProgressIndicatorSettings())
     var microphoneSnapshot = MicrophoneSnapshot.unavailable
@@ -82,6 +90,7 @@ final class CommandCenterStore {
     var progressPID = ""
     var utilityError: String?
     var showsModeSettings = false
+    var utilitySettingsPage = "microphone"
     var universalBrightness = AppPreferences.universalBrightness()
     var flashlightMode = AppPreferences.flashlightMode()
     var proColorBalance = AppPreferences.proColorBalance()
@@ -124,8 +133,8 @@ final class CommandCenterStore {
     @ObservationIgnored private var routedDotScene = CompiledScene(program: "off", slots: [])
     @ObservationIgnored private var routedProClockOrigin = Date.now
     @ObservationIgnored private var routedDotClockOrigin = Date.now
-    @ObservationIgnored private var routedProSourceNodeID: String?
-    @ObservationIgnored private var routedDotSourceNodeID: String?
+    private var routedProSourceNodeID: String?
+    private var routedDotSourceNodeID: String?
     @ObservationIgnored private let nearbyNodeID = AppPreferences.nearbyNodeID()
     @ObservationIgnored private var localSignalSequence: UInt64 = 0
     @ObservationIgnored private var localProgramStartedAt = Date.now
@@ -137,6 +146,7 @@ final class CommandCenterStore {
     @ObservationIgnored private var proHardware: SidePulseHardwareController?
     @ObservationIgnored private var dotHardware: SidePulseHardwareController?
     @ObservationIgnored private let ejectGuard = SidePulseEjectGuard()
+    @ObservationIgnored private let keepAwakeController = KeepAwakeController()
     @ObservationIgnored private var lidMonitor: LidStateMonitor?
     @ObservationIgnored private var batteryMonitor: BatteryStateMonitor?
     @ObservationIgnored private var lastLowBatteryAlertAt: Date?
@@ -149,6 +159,8 @@ final class CommandCenterStore {
     @ObservationIgnored private var lastObservedFocusProfileID: UUID?
     @ObservationIgnored private var softwareDisplayChangeHandler: (@MainActor @Sendable () -> Void)?
     @ObservationIgnored private var microphoneMonitor: MicrophoneActivityMonitor?
+    @ObservationIgnored private var captureMonitor: ScreenCaptureActivityMonitor?
+    @ObservationIgnored private var screenshotReset: Timer?
     @ObservationIgnored private var progressRunner: ProgressTaskRunner?
     @ObservationIgnored private var utilityTimer: Timer?
     @ObservationIgnored private var utilityProProgram: String?
@@ -225,6 +237,7 @@ final class CommandCenterStore {
         startNearbySignalService()
         startProfileAutomation()
         configureUtilityModes()
+        setKeepAwakeEnabled(AppPreferences.keepAwakeEnabled())
     }
 
     var selectedProfile: LightingProfile {
@@ -245,24 +258,53 @@ final class CommandCenterStore {
                 ledCount: device.ledCount
             )
             : underlyingProgram
-        let displayBalance = device.kind == .pro ? proColorBalance : .neutral
-        return LEDProgramOutputCalibration.scalingColors(
-            in: LEDProgramOutputCalibration.settingBrightness(in: program, to: 255),
-            redScale: displayBalance.red,
-            greenScale: displayBalance.green,
-            blueScale: displayBalance.blue
-        )
+        // Color balance is a hardware calibration. Keep software previews,
+        // the menu-bar icon, and the notch faithful to the stored program.
+        return LEDProgramOutputCalibration.settingBrightness(in: program, to: 255)
     }
 
     var softwareDisplayClockOrigin: Date? {
         if let preview = utilityPreview { return preview.origin }
         if device.connected { return device.lastWrite }
-        if utilityMode != .agents { return utilityClockOrigin }
+        if displayedUtilityMode != .agents { return utilityClockOrigin }
         return device.kind == .dot ? routedDotClockOrigin : routedProClockOrigin
     }
 
     var connectedSoftwareDisplayProgram: String {
         device.connected ? softwareDisplayProgram : "off"
+    }
+
+    private var notchUsesNearbySignal: Bool {
+        let source = device.kind == .dot ? routedDotSourceNodeID : routedProSourceNodeID
+        return source != nil && source != nearbyNodeID
+    }
+
+    var notchDrivingAgents: [AgentSession] {
+        guard outputPowerIsOn, displayedUtilityMode == .agents,
+              !(flashlightEnabled && flashlightMode == .overrideEverything),
+              utilityPreview == nil, !notchUsesNearbySignal else { return [] }
+        return NotchAgentSelection.drivingAgents(agents: agents, mode: agentDisplayMode,
+                                                displayedAgentIDs: scene.placementsTopToBottom.map { $0.agent.id })
+    }
+
+    var notchStatusTitle: String {
+        if !outputPowerIsOn { return "Lights off" }
+        if flashlightEnabled && flashlightMode == .overrideEverything { return "Flashlight" }
+        if utilityPreview != nil { return "Lighting preview" }
+        if let utilityStatusTitle { return utilityStatusTitle }
+        if notchUsesNearbySignal { return routedSignalSourceName(for: device.kind) }
+        if notchDrivingAgents.isEmpty { return "SidePulse" }
+        return agentDisplayMode == .simple ? aggregateState.title : "Live agents"
+    }
+
+    var notchStatusDetail: String {
+        if !outputPowerIsOn { return "Turn the lights back on whenever you’re ready." }
+        if flashlightEnabled && flashlightMode == .overrideEverything { return "Flashlight is using the full array." }
+        if utilityPreview != nil { return "Previewing a lighting style." }
+        if displayedUtilityMode != .agents { return utilityStatusDetail }
+        if notchUsesNearbySignal { return "Showing a signal from your nearby Mac." }
+        if notchDrivingAgents.isEmpty { return "No agent is driving the signal right now." }
+        return agentDisplayMode == .simple ? "Driving the current signal" : "Shown on the array"
     }
 
     var aggregateState: AgentState {
@@ -343,11 +385,43 @@ final class CommandCenterStore {
         handler?()
     }
 
+    func setMenuBarVisibilityMode(_ mode: MenuBarVisibilityMode) {
+        menuBarVisibilityMode = mode
+        AppPreferences.saveMenuBarVisibilityMode(mode)
+        notifySoftwareDisplayChanged()
+    }
+
+    func setMenuBarKeepWhenAutoHidden(_ enabled: Bool) {
+        menuBarKeepWhenAutoHidden = enabled
+        AppPreferences.saveMenuBarKeepWhenAutoHidden(enabled)
+        notifySoftwareDisplayChanged()
+    }
+
     func setNotchEnabled(_ enabled: Bool) {
         guard notchEnabled != enabled else { return }
         notchEnabled = enabled
         AppPreferences.saveNotchEnabled(enabled)
         notifySoftwareDisplayChanged()
+    }
+
+    func toggleKeepAwake() {
+        setKeepAwakeEnabled(!keepAwakeEnabled)
+        if keepAwakeEnabled && keepAwakeNeedsAuthorization {
+            keepAwakeController.authorizeClosedLidProtection()
+        }
+    }
+
+    func authorizeClosedLidProtection() {
+        if !keepAwakeEnabled { setKeepAwakeEnabled(true) }
+        keepAwakeController.authorizeClosedLidProtection()
+    }
+
+    private func setKeepAwakeEnabled(_ enabled: Bool) {
+        keepAwakeController.setEnabled(enabled)
+        keepAwakeEnabled = keepAwakeController.isActive
+        keepAwakeStatus = keepAwakeController.statusMessage
+        keepAwakeNeedsAuthorization = keepAwakeController.needsClosedLidAuthorization
+        AppPreferences.saveKeepAwakeEnabled(keepAwakeEnabled)
     }
 
     func setNotchBrightness(_ brightness: Double) {
@@ -1300,10 +1374,10 @@ final class CommandCenterStore {
         let currentDotStates = Dictionary(uniqueKeysWithValues: routedDotScene.placementsTopToBottom.map {
             ($0.agent.id, $0.agent.state)
         })
-        let proTiming = flashlightEnabled || utilityMode != .agents
+        let proTiming = flashlightEnabled || displayedUtilityMode != .agents || interruptsPreview
             ? HardwareUpdateTiming.immediate
             : hardwareTiming(from: lastProOutputStates, to: currentProStates)
-        let dotTiming = flashlightEnabled || utilityMode != .agents
+        let dotTiming = flashlightEnabled || displayedUtilityMode != .agents || interruptsPreview
             ? HardwareUpdateTiming.immediate
             : hardwareTiming(from: lastDotOutputStates, to: currentDotStates)
         let proProgram = flashlightEnabled
@@ -1375,15 +1449,54 @@ final class CommandCenterStore {
 }
 
 extension CommandCenterStore {
+    var onAirSignal: OnAirSignal {
+        guard utilityMode == .microphone else { return .none }
+        return OnAirSignal.resolve(
+            screenshotActive: screenshotActive && captureSettings.screenshotEnabled,
+            microphoneActive: microphoneSnapshot.activity == .inUse || microphoneSnapshot.activity == .muted,
+            hardwareMuted: microphoneSnapshot.activity == .muted,
+            screenRecording: captureSnapshot.isRecording && captureSettings.screenRecordingEnabled
+        )
+    }
+
+    var onAirStyle: StateLightStyle? {
+        switch onAirSignal {
+        case .none: nil
+        case .microphone: microphoneSettings.activeStyle
+        case .hardwareMuted: microphoneSettings.mutedStyle
+        case .screenRecording: captureSettings.recordingStyle
+        case .screenshot: captureSettings.screenshotStyle
+        }
+    }
+
+    var onAirSymbol: String {
+        switch onAirSignal {
+        case .none: "mic"
+        case .microphone: "mic.fill"
+        case .hardwareMuted: "mic.slash.fill"
+        case .screenRecording: "record.circle"
+        case .screenshot: "camera.viewfinder"
+        }
+    }
+
+    /// An armed microphone monitor falls through to the agent signal whenever
+    /// no input is active. Arming it does not take over an idle array.
+    var displayedUtilityMode: UtilityOutputMode {
+        if utilityMode == .microphone, onAirSignal == .none {
+            return .agents
+        }
+        return utilityMode
+    }
+
     var utilityStatusTitle: String? {
-        switch utilityMode {
+        switch displayedUtilityMode {
         case .agents: return nil
         case .microphone:
-            switch microphoneSnapshot.activity {
-            case .inUse: return "Microphone in use"
-            case .muted: return "Microphone hardware muted"
-            case .idle: return "Microphone idle"
-            case .unavailable: return "Microphone unavailable"
+            switch onAirSignal {
+            case .microphone, .screenRecording: return "ON AIR"
+            case .hardwareMuted: return "Microphone hardware muted"
+            case .screenshot: return "Screenshot"
+            case .none: return nil
             }
         case .timer: return timerState.phase == .finished ? "Timer finished" : "Timer · \(timerLabel)"
         case .progress:
@@ -1400,7 +1513,17 @@ extension CommandCenterStore {
     var utilityStatusDetail: String {
         switch utilityMode {
         case .agents: ""
-        case .microphone: microphoneSnapshot.detail
+        case .microphone:
+            switch onAirSignal {
+            case .screenshot: "Screenshot captured"
+            case .screenRecording: captureSnapshot.detail
+            case .microphone:
+                captureSnapshot.isRecording && captureSettings.screenRecordingEnabled
+                    ? "Microphone and screen recording are active."
+                    : "Microphone active · \(microphoneSnapshot.deviceName)"
+            case .hardwareMuted: microphoneSnapshot.detail
+            case .none: "Watching for microphone and screen capture activity. Agent lighting is active."
+            }
         case .timer:
             timerState.phase == .finished ? "Your countdown is complete. Reset the timer when you’re ready." : timerState.phase == .paused ? "Paused with \(timerLabel) remaining." : "The LEDs count down with your timer."
         case .progress: progressSnapshot.detail
@@ -1412,11 +1535,23 @@ extension CommandCenterStore {
     }
 
     private func configureUtilityModes() {
+        keepAwakeController.onStatusChanged = { [weak self] in
+            guard let self else { return }
+            self.keepAwakeStatus = self.keepAwakeController.statusMessage
+            self.keepAwakeNeedsAuthorization = self.keepAwakeController.needsClosedLidAuthorization
+        }
         microphoneMonitor = MicrophoneActivityMonitor { [weak self] snapshot in
             guard let self, self.utilityMode == .microphone else { return }
             self.microphoneSnapshot = snapshot
-            self.refreshUtilityOutput()
+            self.refreshUtilityOutput(interruptsPreview: true)
         }
+        captureMonitor = ScreenCaptureActivityMonitor(onChange: { [weak self] snapshot in
+            guard let self, self.utilityMode == .microphone else { return }
+            self.captureSnapshot = snapshot
+            self.refreshUtilityOutput(interruptsPreview: true)
+        }, onScreenshot: { [weak self] in
+            self?.showScreenshotIndicator()
+        })
         progressRunner = ProgressTaskRunner { [weak self] snapshot in
             guard let self else { return }
             self.progressSnapshot = snapshot
@@ -1427,7 +1562,10 @@ extension CommandCenterStore {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.progressRunner?.shutdown()
+                self?.keepAwakeController.stop()
                 self?.microphoneMonitor?.stop()
+                self?.captureMonitor?.stop()
+                self?.screenshotReset?.invalidate()
                 self?.utilityTimer?.invalidate()
             }
         }
@@ -1439,8 +1577,17 @@ extension CommandCenterStore {
         utilityError = nil
         if mode != .agents { flashlightEnabled = false }
         if carriesFlashlightPower { setOutputPower(true) }
-        if mode == .microphone { microphoneMonitor?.start() }
-        else { microphoneMonitor?.stop() }
+        if mode == .microphone {
+            microphoneMonitor?.start()
+            captureMonitor?.start()
+        } else {
+            microphoneMonitor?.stop()
+            captureMonitor?.stop()
+            screenshotReset?.invalidate()
+            screenshotReset = nil
+            screenshotActive = false
+            captureSnapshot = .unavailable
+        }
         utilityPreviewReset?.invalidate()
         utilityPreview = nil
         refreshUtilityOutput(interruptsPreview: true)
@@ -1450,7 +1597,8 @@ extension CommandCenterStore {
         selectUtilityMode(utilityMode == .microphone ? .agents : .microphone)
     }
 
-    func openUtilitySettings() {
+    func openUtilitySettings(_ mode: UtilityOutputMode = .microphone) {
+        utilitySettingsPage = mode.rawValue
         showsModeSettings = true
         selectedSection = .settings
     }
@@ -1507,6 +1655,41 @@ extension CommandCenterStore {
         update(&microphoneSettings)
         UtilityPreferences.save(microphoneSettings, key: "microphone")
         if utilityMode == .microphone { refreshUtilityOutput() }
+    }
+
+    func updateCaptureSettings(_ update: (inout CaptureIndicatorSettings) -> Void) {
+        update(&captureSettings)
+        if !captureSettings.screenshotEnabled {
+            screenshotReset?.invalidate()
+            screenshotReset = nil
+            screenshotActive = false
+        }
+        UtilityPreferences.save(captureSettings, key: "capture")
+        if utilityMode == .microphone { refreshUtilityOutput(interruptsPreview: true) }
+    }
+
+    func enableScreenRecordingDetection() {
+        captureMonitor?.requestAccessibilityAccess()
+    }
+
+    private func showScreenshotIndicator() {
+        guard utilityMode == .microphone, captureSettings.screenshotEnabled else { return }
+        screenshotReset?.invalidate()
+        screenshotActive = true
+        utilityClockOrigin = .now
+        refreshUtilityOutput(interruptsPreview: true)
+        // One complete sweep, then restore the current mic/recording/agent signal.
+        let duration = max(0.2, min(30, captureSettings.screenshotStyle.cycleSeconds))
+        let timer = Timer(timeInterval: duration, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.screenshotActive = false
+                self.screenshotReset = nil
+                self.refreshUtilityOutput(interruptsPreview: true)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        screenshotReset = timer
     }
 
     func updateTimerSettings(_ update: (inout TimerIndicatorSettings) -> Void) {
@@ -1575,15 +1758,7 @@ extension CommandCenterStore {
         switch utilityMode {
         case .agents: return nil
         case .microphone:
-            let style: StateLightStyle
-            switch microphoneSnapshot.activity {
-            case .inUse: style = microphoneSettings.activeStyle
-            case .muted: style = microphoneSettings.mutedStyle
-            case .idle:
-                guard microphoneSettings.showsWhenIdle else { return "off" }
-                style = microphoneSettings.idleStyle
-            case .unavailable: return "off"
-            }
+            guard let style = onAirStyle else { return nil }
             return UtilityLightingScenes.program(style: style, ledCount: ledCount)
         case .timer:
             guard timerState.isActive else { return "off" }
