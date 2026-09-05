@@ -7,6 +7,7 @@ enum NotchInteractionSmoke {
         testMenuBarVisibilityMatrix()
         testMenuBarPreferenceIsolation()
         testAgentSelection()
+        testDisplayStyleGeometry()
         testExpandedGeometry()
         await testPanelExpansionContract()
         print("Notch interaction smoke passed")
@@ -168,6 +169,25 @@ enum NotchInteractionSmoke {
         precondition(narrow.maxY == narrowScreen.maxY)
     }
 
+    private static func testDisplayStyleGeometry() {
+        let screen = CGRect(x: -1728, y: 400, width: 1728, height: 1117)
+        let synthetic = NotchDisplayGeometry.syntheticFrame(screen: screen)
+        precondition(NotchDisplayStyle.resolve(notchDepth: 0) == .syntheticIsland)
+        precondition(NotchDisplayStyle.resolve(notchDepth: 29) == .physicalNotch)
+        precondition(synthetic.width == NotchDisplayGeometry.syntheticWidth)
+        precondition(synthetic.height == NotchDisplayGeometry.syntheticHeight)
+        precondition(synthetic.midX == screen.midX && synthetic.maxY == screen.maxY)
+
+        let expanded = NotchDisplayGeometry.expandedFrame(
+            collapsed: synthetic,
+            screen: screen,
+            contentHeight: 200
+        )
+        precondition(expanded.width == 400)
+        precondition(expanded.height == NotchDisplayGeometry.syntheticHeight + 200 + 22)
+        precondition(expanded.midX == screen.midX && expanded.maxY == screen.maxY)
+    }
+
     @MainActor
     private static func testPanelExpansionContract() async {
         _ = NSApplication.shared
@@ -207,13 +227,19 @@ enum NotchInteractionSmoke {
         } else {
             notchWidth = nil
         }
+        let style = NotchDisplayStyle.resolve(notchDepth: depth)
         let collapsed = NotchDisplayGeometry.frame(
             screen: screen.frame,
             notchDepth: depth,
-            notchWidth: notchWidth
+            notchWidth: notchWidth,
+            style: style
         )
         precondition(panel.frame == collapsed)
         precondition(panel.frame.maxY == screen.frame.maxY)
+        if style == .syntheticIsland {
+            precondition(collapsed.width == NotchDisplayGeometry.syntheticWidth)
+            precondition(collapsed.height == NotchDisplayGeometry.syntheticHeight)
+        }
 
         controller.setExpanded(true, animated: false)
         precondition(controller.isExpanded && controller.isPresented)

@@ -5,31 +5,25 @@ import ServiceManagement
 import UniformTypeIdentifiers
 
 enum CommandCenterSection: String, CaseIterable, Identifiable {
-    case overview, lighting, profiles, agents, hardware, system, diagnostics, settings
+    case overview, lighting, agents, hardware, settings
 
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .overview: "Command Center"
-        case .lighting: "Lighting Studio"
-        case .profiles: "Profiles"
-        case .agents: "Agents"
-        case .hardware: "Hardware"
-        case .system: "Connections"
-        case .diagnostics: "Diagnostics"
-        case .settings: "Settings"
+        case .overview: "Overview"
+        case .lighting: "Lighting"
+        case .agents: "Agent Hub"
+        case .hardware: "Devices & Macs"
+        case .settings: "Preferences"
         }
     }
 
     var symbol: String {
         switch self {
-        case .overview: "sparkles.rectangle.stack.fill"
+        case .overview: "square.grid.2x2.fill"
         case .lighting: "lightbulb.led.wide.fill"
-        case .profiles: "square.stack.3d.up.fill"
         case .agents: "cpu.fill"
-        case .hardware: "externaldrive.fill"
-        case .system: "switch.2"
-        case .diagnostics: "waveform.path.ecg"
+        case .hardware: "point.3.connected.trianglepath.dotted"
         case .settings: "gearshape.fill"
         }
     }
@@ -106,6 +100,7 @@ final class CommandCenterStore {
     var dotOutputCalibration = AppPreferences.outputCalibration(for: .dot)
     var nearbyPeers: [NearbySignalPeer] = []
     var nearbyStatusMessage = "Nearby network is off"
+    private(set) var nearbyServiceSnapshot = NearbySignalServiceSnapshot.localOnly
     var nearbyLastSignalAt: Date?
     var launchAtLoginEnabled = false
     var launchAtLoginMessage: String?
@@ -136,6 +131,8 @@ final class CommandCenterStore {
     private var routedProSourceNodeID: String?
     private var routedDotSourceNodeID: String?
     @ObservationIgnored private let nearbyNodeID = AppPreferences.nearbyNodeID()
+    @ObservationIgnored private let localHostDisplayName = Host.current().localizedName
+        ?? ProcessInfo.processInfo.hostName
     @ObservationIgnored private var localSignalSequence: UInt64 = 0
     @ObservationIgnored private var localProgramStartedAt = Date.now
     @ObservationIgnored private var receivedNearbySignals: [String: ReceivedNearbySignal] = [:]
@@ -317,6 +314,14 @@ final class CommandCenterStore {
 
     var hasLocalVisibleActivity: Bool {
         lightingAgents.contains { $0.state != .idle }
+    }
+
+    var localMacDisplayName: String {
+        localHostDisplayName
+    }
+
+    var localMacNodeID: String {
+        nearbyNodeID
     }
 
     func signalSource(for kind: SidePulseDeviceKind) -> SidePulseSignalSource {
@@ -908,11 +913,9 @@ final class CommandCenterStore {
     }
 
     private func startNearbySignalService() {
-        let displayName = Host.current().localizedName
-            ?? ProcessInfo.processInfo.hostName
         let service = NearbySidePulseService(
             nodeID: nearbyNodeID,
-            displayName: displayName,
+            displayName: localHostDisplayName,
             onPeers: { [weak self] peers in
                 Task { @MainActor [weak self] in
                     self?.handleNearbyPeers(peers)
@@ -926,6 +929,11 @@ final class CommandCenterStore {
             onStatus: { [weak self] status in
                 Task { @MainActor [weak self] in
                     self?.nearbyStatusMessage = status
+                }
+            },
+            onSnapshot: { [weak self] snapshot in
+                Task { @MainActor [weak self] in
+                    self?.nearbyServiceSnapshot = snapshot
                 }
             }
         )

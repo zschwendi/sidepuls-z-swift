@@ -3,15 +3,57 @@ import QuartzCore
 
 /// Native adaptation of Peter Kuhar's SidePulse Notch geometry and light blend.
 /// Source: inteliwear/sidepulse, virtual_device.py, MIT (see NOTICE).
+enum NotchDisplayStyle: Equatable {
+    case physicalNotch
+    case syntheticIsland
+
+    static func resolve(notchDepth: CGFloat) -> Self {
+        notchDepth > 0 ? .physicalNotch : .syntheticIsland
+    }
+
+    var hasPhysicalNotch: Bool {
+        self == .physicalNotch
+    }
+
+    var isSynthetic: Bool {
+        self == .syntheticIsland
+    }
+}
+
 enum NotchDisplayGeometry {
     static let bandHeight: CGFloat = 5
+    static let syntheticWidth: CGFloat = 220
+    static let syntheticHeight: CGFloat = 32
 
     static func frame(screen: CGRect, notchDepth: CGFloat, notchWidth: CGFloat?) -> CGRect {
         // NSScreen reports the cutout in the current display's logical points,
         // including display scaling. Do not impose a model-specific minimum.
-        let width = min(screen.width, max(0, notchWidth ?? 220))
+        let width = min(screen.width, max(0, notchWidth ?? syntheticWidth))
         let height = max(0, notchDepth) + bandHeight
         return CGRect(x: screen.midX - width / 2, y: screen.maxY - height, width: width, height: height)
+    }
+
+    static func frame(
+        screen: CGRect,
+        notchDepth: CGFloat,
+        notchWidth: CGFloat?,
+        style: NotchDisplayStyle
+    ) -> CGRect {
+        switch style {
+        case .physicalNotch:
+            return frame(screen: screen, notchDepth: notchDepth, notchWidth: notchWidth)
+        case .syntheticIsland:
+            return syntheticFrame(screen: screen)
+        }
+    }
+
+    static func syntheticFrame(screen: CGRect) -> CGRect {
+        let width = min(screen.width, syntheticWidth)
+        let height = min(screen.height, syntheticHeight)
+        return CGRect(x: screen.midX - width / 2,
+                      y: screen.maxY - height,
+                      width: width,
+                      height: height)
     }
 
     static func expandedFrame(collapsed: CGRect, screen: CGRect, contentHeight: CGFloat) -> CGRect {
@@ -189,10 +231,17 @@ final class NotchDisplayController: NSObject {
         } else {
             width = nil
         }
-        let collapsed = NotchDisplayGeometry.frame(screen: screen.frame, notchDepth: depth, notchWidth: width)
+        let displayStyle = NotchDisplayStyle.resolve(notchDepth: depth)
+        let collapsed = NotchDisplayGeometry.frame(
+            screen: screen.frame,
+            notchDepth: depth,
+            notchWidth: width,
+            style: displayStyle
+        )
         let frame = isExpanded
             ? NotchDisplayGeometry.expandedFrame(collapsed: collapsed, screen: screen.frame, contentHeight: islandContentHeight)
             : collapsed
+        containerView?.displayStyle = displayStyle
         containerView?.collapsedSize = collapsed.size
         if targetFrame != frame {
             targetFrame = frame
@@ -236,7 +285,14 @@ final class NotchDisplayController: NSObject {
         containerView?.needsLayout = true
         if panel?.isVisible != true { panel?.orderFrontRegardless() }
         onPresentationChanged?()
-        ledView?.configure(program: program, ledCount: ledCount, clockOrigin: clockOrigin, brightness: brightness, hasNotch: depth > 0)
+        ledView?.configure(
+            program: program,
+            ledCount: ledCount,
+            clockOrigin: clockOrigin,
+            brightness: brightness,
+            hasNotch: displayStyle.hasPhysicalNotch,
+            isSynthetic: displayStyle.isSynthetic
+        )
     }
 
     private func finishTransition(_ transition: Int) {
@@ -265,6 +321,7 @@ private final class NotchInteractionView: NSView {
     let backdrop = NSView()
     var collapsedSize: CGSize = .zero
     var islandSize: CGSize = .zero
+    var displayStyle: NotchDisplayStyle = .physicalNotch { didSet { needsLayout = true } }
     var isExpanded = false { didSet { needsLayout = true } }
     private var hoverArea: NSTrackingArea?
 
@@ -300,7 +357,9 @@ private final class NotchInteractionView: NSView {
                                    y: bounds.height - collapsedSize.height - 8 - islandSize.height,
                                    width: islandSize.width, height: islandSize.height)
         backdrop.frame = bounds
-        layer?.cornerRadius = isExpanded ? 22 : 0
+        layer?.cornerRadius = isExpanded
+            ? 22
+            : (displayStyle.isSynthetic ? min(collapsedSize.width, collapsedSize.height) / 2 : 0)
     }
 }
 
@@ -312,6 +371,7 @@ final class NotchLEDView: NSView {
     private var clockOrigin: Date?
     private var brightness = 1.0
     private var hasNotch = false
+    private var isSynthetic = false
     private var colors: [LEDProgramColor] = []
     private var animationDisplayLink: CADisplayLink?
 
@@ -327,7 +387,14 @@ final class NotchLEDView: NSView {
 
     deinit { animationDisplayLink?.invalidate() }
 
-    func configure(program: String, ledCount: Int, clockOrigin: Date?, brightness: Double, hasNotch: Bool) {
+    func configure(
+        program: String,
+        ledCount: Int,
+        clockOrigin: Date?,
+        brightness: Double,
+        hasNotch: Bool,
+        isSynthetic: Bool = false
+    ) {
         if programText != program || self.ledCount != ledCount {
             programText = program
             self.ledCount = ledCount
@@ -335,8 +402,9 @@ final class NotchLEDView: NSView {
         }
         self.clockOrigin = clockOrigin
         self.brightness = brightness
-        if self.hasNotch != hasNotch { needsDisplay = true }
+        if self.hasNotch != hasNotch || self.isSynthetic != isSynthetic { needsDisplay = true }
         self.hasNotch = hasNotch
+        self.isSynthetic = isSynthetic
         if animationDisplayLink == nil {
             let link = displayLink(target: self, selector: #selector(renderFrame))
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
@@ -365,19 +433,30 @@ final class NotchLEDView: NSView {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.clear(bounds)
         context.saveGState()
-        let body = CGMutablePath()
-        let radius: CGFloat = hasNotch ? min(8, bounds.height / 2) : 0
-        body.move(to: CGPoint(x: 0, y: bounds.height))
-        body.addLine(to: CGPoint(x: bounds.width, y: bounds.height))
-        body.addLine(to: CGPoint(x: bounds.width, y: radius))
-        body.addQuadCurve(to: CGPoint(x: bounds.width - radius, y: 0), control: CGPoint(x: bounds.width, y: 0))
-        body.addLine(to: CGPoint(x: radius, y: 0))
-        body.addQuadCurve(to: CGPoint(x: 0, y: radius), control: .zero)
-        body.addLine(to: CGPoint(x: 0, y: bounds.height))
-        body.closeSubpath()
+        let body: CGPath
+        if isSynthetic {
+            body = CGPath(
+                roundedRect: bounds,
+                cornerWidth: min(bounds.width, bounds.height) / 2,
+                cornerHeight: min(bounds.width, bounds.height) / 2,
+                transform: nil
+            )
+        } else {
+            let path = CGMutablePath()
+            let radius: CGFloat = hasNotch ? min(8, bounds.height / 2) : 0
+            path.move(to: CGPoint(x: 0, y: bounds.height))
+            path.addLine(to: CGPoint(x: bounds.width, y: bounds.height))
+            path.addLine(to: CGPoint(x: bounds.width, y: radius))
+            path.addQuadCurve(to: CGPoint(x: bounds.width - radius, y: 0), control: CGPoint(x: bounds.width, y: 0))
+            path.addLine(to: CGPoint(x: radius, y: 0))
+            path.addQuadCurve(to: CGPoint(x: 0, y: radius), control: .zero)
+            path.addLine(to: CGPoint(x: 0, y: bounds.height))
+            path.closeSubpath()
+            body = path
+        }
         context.addPath(body)
         context.clip()
-        if hasNotch {
+        if hasNotch || isSynthetic {
             context.setFillColor(NSColor(calibratedWhite: 0.006, alpha: 0.93).cgColor)
             context.fill(bounds)
         }

@@ -13,6 +13,7 @@ final class NearbySidePulseService: @unchecked Sendable {
     typealias PeerHandler = @Sendable ([NearbySignalPeer]) -> Void
     typealias SignalHandler = @Sendable (ReceivedNearbySignal) -> Void
     typealias StatusHandler = @Sendable (String) -> Void
+    typealias SnapshotHandler = @Sendable (NearbySignalServiceSnapshot) -> Void
 
     let nodeID: String
     let displayName: String
@@ -27,12 +28,14 @@ final class NearbySidePulseService: @unchecked Sendable {
     private let onPeers: PeerHandler
     private let onSignal: SignalHandler
     private let onStatus: StatusHandler
+    private let onSnapshot: SnapshotHandler
 
     private var configuration = NearbySignalServiceConfiguration.localOnly
     private var latestLocalFrame: NearbySignalFrame?
 
     private var listener: NWListener?
     private var listenerGeneration = UUID()
+    private var listenerReady = false
     private var inboundConnections: [UUID: NWConnection] = [:]
     private var readyInboundConnections = Set<UUID>()
     private var pendingInboundSends = Set<UUID>()
@@ -40,6 +43,7 @@ final class NearbySidePulseService: @unchecked Sendable {
 
     private var browser: NWBrowser?
     private var browserGeneration = UUID()
+    private var browserReady = false
     private var discoveredPeers: [String: DiscoveredPeer] = [:]
     private var outboundConnections: [String: NWConnection] = [:]
     private var outboundGenerations: [String: UUID] = [:]
@@ -51,7 +55,8 @@ final class NearbySidePulseService: @unchecked Sendable {
         displayName: String,
         onPeers: @escaping PeerHandler,
         onSignal: @escaping SignalHandler,
-        onStatus: @escaping StatusHandler
+        onStatus: @escaping StatusHandler,
+        onSnapshot: @escaping SnapshotHandler = { _ in }
     ) {
         self.nodeID = nodeID
         self.displayName = displayName
@@ -60,6 +65,7 @@ final class NearbySidePulseService: @unchecked Sendable {
         self.onPeers = onPeers
         self.onSignal = onSignal
         self.onStatus = onStatus
+        self.onSnapshot = onSnapshot
     }
 
     deinit {
@@ -164,8 +170,10 @@ final class NearbySidePulseService: @unchecked Sendable {
         guard generation == listenerGeneration else { return }
         switch state {
         case .ready:
+            listenerReady = true
             publishStatusLocked()
         case .failed(let error):
+            listenerReady = false
             reportStatusLocked("Couldn’t share this Mac: \(error.localizedDescription)")
             stopListenerLocked()
             guard configuration.sharesLocalSignal else { return }
@@ -173,8 +181,12 @@ final class NearbySidePulseService: @unchecked Sendable {
                 self?.startListenerLocked()
             }
         case .waiting(let error):
+            listenerReady = false
             reportStatusLocked("Waiting to share on the local network: \(error.localizedDescription)")
+            publishSnapshotLocked()
         case .cancelled:
+            listenerReady = false
+            publishSnapshotLocked()
             break
         default:
             break
@@ -220,6 +232,7 @@ final class NearbySidePulseService: @unchecked Sendable {
 
     private func stopListenerLocked() {
         listenerGeneration = UUID()
+        listenerReady = false
         listener?.cancel()
         listener = nil
         heartbeat?.cancel()
@@ -231,6 +244,7 @@ final class NearbySidePulseService: @unchecked Sendable {
         inboundConnections.removeAll(keepingCapacity: true)
         readyInboundConnections.removeAll(keepingCapacity: true)
         pendingInboundSends.removeAll(keepingCapacity: true)
+        publishSnapshotLocked()
     }
 
     private func sendLatestFrameToInboundConnectionsLocked() {
@@ -308,8 +322,10 @@ final class NearbySidePulseService: @unchecked Sendable {
         guard generation == browserGeneration else { return }
         switch state {
         case .ready:
+            browserReady = true
             publishStatusLocked()
         case .failed(let error):
+            browserReady = false
             reportStatusLocked("Nearby discovery failed: \(error.localizedDescription)")
             stopBrowserLocked()
             guard configuration.discoversPeers else { return }
@@ -317,8 +333,12 @@ final class NearbySidePulseService: @unchecked Sendable {
                 self?.startBrowserLocked()
             }
         case .waiting(let error):
+            browserReady = false
             reportStatusLocked("Waiting for Local Network access: \(error.localizedDescription)")
+            publishSnapshotLocked()
         case .cancelled:
+            browserReady = false
+            publishSnapshotLocked()
             break
         default:
             break
@@ -349,11 +369,13 @@ final class NearbySidePulseService: @unchecked Sendable {
 
     private func stopBrowserLocked() {
         browserGeneration = UUID()
+        browserReady = false
         browser?.cancel()
         browser = nil
         discoveredPeers.removeAll(keepingCapacity: true)
         cancelAllOutboundConnectionsLocked()
         onPeers([])
+        publishSnapshotLocked()
     }
 
     private func reconcileOutboundConnectionsLocked() {
@@ -476,6 +498,7 @@ final class NearbySidePulseService: @unchecked Sendable {
     }
 
     private func publishStatusLocked() {
+        publishSnapshotLocked()
         guard configuration.sharesLocalSignal || configuration.discoversPeers else {
             reportStatusLocked("Nearby network is off")
             return
@@ -513,5 +536,17 @@ final class NearbySidePulseService: @unchecked Sendable {
     private func reportStatusLocked(_ message: String) {
         Self.logger.info("\(message, privacy: .public)")
         onStatus(message)
+    }
+
+    private func publishSnapshotLocked() {
+        onSnapshot(
+            NearbySignalServiceSnapshot(
+                listenerReady: listenerReady,
+                browserReady: browserReady,
+                discoveredPeerIDs: Set(discoveredPeers.keys),
+                readyOutboundPeerIDs: readyOutboundPeers,
+                inboundReceiverCount: readyInboundConnections.count
+            )
+        )
     }
 }

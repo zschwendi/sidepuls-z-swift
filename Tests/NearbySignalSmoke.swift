@@ -276,6 +276,30 @@ enum NearbySignalSmoke {
         precondition(unionConfiguration.receivesNearbySignals)
         precondition(unionConfiguration.followedPeerIDs.count == 2)
 
+        let localOnlySnapshot = NearbySignalServiceSnapshot.localOnly
+        precondition(!localOnlySnapshot.listenerReady)
+        precondition(!localOnlySnapshot.browserReady)
+        precondition(localOnlySnapshot.discoveredPeerIDs.isEmpty)
+        precondition(localOnlySnapshot.readyOutboundPeerIDs.isEmpty)
+        precondition(localOnlySnapshot.inboundReceiverCount == 0)
+
+        let connectedSnapshot = NearbySignalServiceSnapshot(
+            listenerReady: true,
+            browserReady: true,
+            discoveredPeerIDs: [remoteID],
+            readyOutboundPeerIDs: [remoteID],
+            inboundReceiverCount: 2
+        )
+        precondition(
+            connectedSnapshot == NearbySignalServiceSnapshot(
+                listenerReady: true,
+                browserReady: true,
+                discoveredPeerIDs: [remoteID],
+                readyOutboundPeerIDs: [remoteID],
+                inboundReceiverCount: 2
+            )
+        )
+
         var selfFrame = remote
         selfFrame.sourceNodeID = localID
         let selfReceipt = ReceivedNearbySignal(peerID: localID, frame: selfFrame, receivedAt: now)

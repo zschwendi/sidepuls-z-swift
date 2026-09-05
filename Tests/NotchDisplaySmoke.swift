@@ -19,8 +19,29 @@ enum NotchDisplaySmoke {
             precondition(scaled.width == width && scaled.midX == screen.midX)
             precondition(scaled.maxY == screen.maxY)
         }
+
+        precondition(NotchDisplayStyle.resolve(notchDepth: 32) == .physicalNotch)
+        precondition(NotchDisplayStyle.resolve(notchDepth: 0) == .syntheticIsland)
+        let styledPhysical = NotchDisplayGeometry.frame(
+            screen: screen,
+            notchDepth: 32,
+            notchWidth: 200,
+            style: .physicalNotch
+        )
+        precondition(styledPhysical == notch, "Physical notch geometry must remain unchanged")
+
         let flat = NotchDisplayGeometry.frame(screen: screen, notchDepth: 0, notchWidth: nil)
         precondition(flat.height == 5 && flat.maxY == screen.maxY && flat.midX == screen.midX)
+        let synthetic = NotchDisplayGeometry.frame(
+            screen: screen,
+            notchDepth: 0,
+            notchWidth: nil,
+            style: .syntheticIsland
+        )
+        precondition(synthetic == NotchDisplayGeometry.syntheticFrame(screen: screen))
+        precondition(synthetic.width == NotchDisplayGeometry.syntheticWidth)
+        precondition(synthetic.height == NotchDisplayGeometry.syntheticHeight)
+        precondition(synthetic.midX == screen.midX && synthetic.maxY == screen.maxY)
         let narrow = NotchDisplayGeometry.frame(screen: CGRect(x: 0, y: 0, width: 150, height: 100), notchDepth: -1, notchWidth: 999)
         precondition(narrow.width == 150 && narrow.height == 5)
         let red = LEDProgramColor(red: 1, green: 0, blue: 0)
@@ -62,28 +83,54 @@ enum NotchDisplaySmoke {
             let panel = NSApp.windows.first { $0.title == "SidePulse Notch" }!
             precondition(panel.isVisible && panel.ignoresMouseEvents && !panel.isKeyWindow)
             precondition(panel.level == .statusBar && panel.collectionBehavior.contains(.fullScreenAuxiliary))
-            if let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }),
-               let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea,
+            let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.screens[0]
+            let depth = screen.safeAreaInsets.top
+            let notchWidth: CGFloat?
+            if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea,
                right.minX > left.maxX {
-                precondition(panel.frame.width == right.minX - left.maxX,
-                             "The overlay must use the actual display cutout width")
-                precondition(panel.frame.height == screen.safeAreaInsets.top + NotchDisplayGeometry.bandHeight)
+                notchWidth = right.minX - left.maxX
+            } else {
+                notchWidth = nil
+            }
+            let style = NotchDisplayStyle.resolve(notchDepth: depth)
+            let expected = NotchDisplayGeometry.frame(
+                screen: screen.frame,
+                notchDepth: depth,
+                notchWidth: notchWidth,
+                style: style
+            )
+            precondition(panel.frame == expected)
+            if style == .physicalNotch {
+                if let notchWidth {
+                    precondition(panel.frame.width == notchWidth,
+                                 "The overlay must use the actual display cutout width")
+                }
+                precondition(panel.frame.height == depth + NotchDisplayGeometry.bandHeight)
+            } else {
+                precondition(panel.frame.width == min(screen.frame.width, NotchDisplayGeometry.syntheticWidth))
+                precondition(panel.frame.height == min(screen.frame.height, NotchDisplayGeometry.syntheticHeight))
             }
             controller.update(enabled: true, program: "#FF00FF", ledCount: 8, clockOrigin: nil, brightness: 0)
             precondition(!panel.isVisible)
             controller.update(enabled: false, program: "#FF00FF", ledCount: 8, clockOrigin: nil, brightness: 1)
             precondition(!panel.isVisible)
         }
-        // Offscreen visual fixtures exercise both display shapes without touching
+        // Offscreen visual fixtures exercise physical, flat, and synthetic
+        // display shapes without touching
         // the running app, its settings, hardware, or event socket.
         if let output = ProcessInfo.processInfo.environment["SIDEPULSE_NOTCH_QA_DIR"] {
-            for hasNotch in [false, true] {
-                let view = NotchLEDView(frame: CGRect(x: 0, y: 0, width: 220, height: hasNotch ? 37 : 5))
-                view.configure(program: "0:#FF00FF; 1:#FF00FF; 2:#8000FF; 3:#0000FF; 4:#00FFFF; 5:#00FF80; 6:#FFFF00; 7:#FF8000", ledCount: 8, clockOrigin: nil, brightness: 1, hasNotch: hasNotch)
+            let fixtures: [(name: String, hasNotch: Bool, isSynthetic: Bool, size: CGSize)] = [
+                ("flat-display.png", false, false, CGSize(width: 220, height: 5)),
+                ("synthetic-island.png", false, true, CGSize(width: NotchDisplayGeometry.syntheticWidth, height: NotchDisplayGeometry.syntheticHeight)),
+                ("notch.png", true, false, CGSize(width: 220, height: 37)),
+            ]
+            for fixture in fixtures {
+                let view = NotchLEDView(frame: CGRect(origin: .zero, size: fixture.size))
+                view.configure(program: "0:#FF00FF; 1:#FF00FF; 2:#8000FF; 3:#0000FF; 4:#00FFFF; 5:#00FF80; 6:#FFFF00; 7:#FF8000", ledCount: 8, clockOrigin: nil, brightness: 1, hasNotch: fixture.hasNotch, isSynthetic: fixture.isSynthetic)
                 let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
                 view.cacheDisplay(in: view.bounds, to: bitmap)
                 let data = bitmap.representation(using: .png, properties: [:])!
-                try data.write(to: URL(fileURLWithPath: output).appendingPathComponent(hasNotch ? "notch.png" : "flat-display.png"))
+                try data.write(to: URL(fileURLWithPath: output).appendingPathComponent(fixture.name))
                 view.stopAnimating()
             }
         }

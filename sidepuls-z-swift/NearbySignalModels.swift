@@ -75,6 +75,22 @@ struct NearbySignalServiceConfiguration: Equatable, Sendable {
     }
 }
 
+struct NearbySignalServiceSnapshot: Equatable, Sendable {
+    var listenerReady: Bool
+    var browserReady: Bool
+    var discoveredPeerIDs: Set<String>
+    var readyOutboundPeerIDs: Set<String>
+    var inboundReceiverCount: Int
+
+    static let localOnly = NearbySignalServiceSnapshot(
+        listenerReady: false,
+        browserReady: false,
+        discoveredPeerIDs: [],
+        readyOutboundPeerIDs: [],
+        inboundReceiverCount: 0
+    )
+}
+
 struct NearbySignalPeer: Identifiable, Equatable, Sendable {
     var id: String
     var displayName: String

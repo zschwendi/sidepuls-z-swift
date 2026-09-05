@@ -311,7 +311,7 @@ struct UtilitySettingsView: View {
     private enum Page: String, CaseIterable {
         case microphone, timer, notch, coffee
         var title: String {
-            switch self { case .microphone: "ON AIR"; case .timer: "Timer"; case .notch: "Notch"; case .coffee: "Coffee" }
+            switch self { case .microphone: "ON AIR"; case .timer: "Timer"; case .notch: "Top Display"; case .coffee: "Coffee" }
         }
         var symbol: String {
             switch self { case .microphone: "mic.fill"; case .timer: "timer"; case .notch: "rectangle.topthird.inset.filled"; case .coffee: "cup.and.saucer.fill" }
@@ -358,8 +358,8 @@ struct UtilitySettingsView: View {
                             timerSettings
                         }
                     case .notch:
-                        UtilitySettingsCard(title: "SidePulse Notch", symbol: page.symbol, tint: page.tint,
-                            detail: "Your active lighting, just beneath the camera notch. It also works at the top of a display without one.") {
+                        UtilitySettingsCard(title: "Top Display Island", symbol: page.symbol, tint: page.tint,
+                            detail: "Your active lighting, just beneath the camera notch—or in a compact island at the top of a display without one.") {
                             notchSettings
                         }
                     case .coffee:
@@ -521,7 +521,7 @@ struct UtilitySettingsView: View {
 
     private var notchSettings: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Toggle("Enable SidePulse Notch", isOn: Binding(
+            Toggle("Enable Top Display Island", isOn: Binding(
                 get: { store.notchEnabled },
                 set: { store.setNotchEnabled($0) }
             ))
@@ -535,12 +535,12 @@ struct UtilitySettingsView: View {
                     set: { store.setNotchBrightness($0) }
                 ), in: 0...1, step: 0.01)
                 .disabled(!store.notchEnabled)
-                .accessibilityLabel("Notch brightness")
+                .accessibilityLabel("Top display brightness")
                 Text("\(Int((store.notchBrightness * 100).rounded()))%")
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .frame(width: 38, alignment: .trailing)
             }
-            Text("Hover over the notch for agents and quick controls.")
+            Text("Hover over the top-center island for agents and quick controls.")
                 .font(.caption).foregroundStyle(.secondary)
 
             Divider().padding(.vertical, 4)

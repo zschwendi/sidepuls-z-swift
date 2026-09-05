@@ -7,7 +7,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 195)
+                .navigationSplitViewColumnWidth(min: 164, ideal: 184, max: 220)
         } detail: {
             ZStack {
                 CommandCenterBackground()
@@ -21,19 +21,13 @@ struct ContentView: View {
 
     private var sidebar: some View {
         List(selection: $store.selectedSection) {
-            Section("Home") {
+            Section {
                 Label(CommandCenterSection.overview.title, systemImage: CommandCenterSection.overview.symbol)
                     .tag(CommandCenterSection.overview)
-            }
-            Section("Customize") {
-                Label(CommandCenterSection.lighting.title, systemImage: CommandCenterSection.lighting.symbol)
-                    .tag(CommandCenterSection.lighting)
-            }
-            Section("Monitor") {
                 Label(CommandCenterSection.agents.title, systemImage: CommandCenterSection.agents.symbol)
                     .tag(CommandCenterSection.agents)
-            }
-            Section("Device") {
+                Label(CommandCenterSection.lighting.title, systemImage: CommandCenterSection.lighting.symbol)
+                    .tag(CommandCenterSection.lighting)
                 Label(CommandCenterSection.hardware.title, systemImage: CommandCenterSection.hardware.symbol)
                     .tag(CommandCenterSection.hardware)
             }
@@ -49,11 +43,8 @@ struct ContentView: View {
         switch store.selectedSection {
         case .overview: OverviewView(store: store)
         case .lighting: LightingStudioView(store: store)
-        case .profiles: ProfilesView(store: store)
         case .agents: AgentsView(store: store)
         case .hardware: HardwareView(store: store)
-        case .system: ConnectionsView(store: store)
-        case .diagnostics: DiagnosticsView(store: store)
         case .settings: SettingsView(store: store)
         }
     }
@@ -73,18 +64,130 @@ struct OverviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 16) {
                 CommandCenterHero(store: store)
-                HStack(alignment: .top, spacing: 18) {
-                    LEDDeckView(store: store)
-                        .frame(maxWidth: .infinity)
-                    OverviewAgentsView(store: store)
-                        .frame(maxWidth: .infinity)
+                OverviewSignalRoutesView(store: store)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 16) {
+                        LEDDeckView(store: store)
+                            .frame(maxWidth: .infinity)
+                        OverviewAgentsView(store: store)
+                            .frame(maxWidth: .infinity)
+                    }
+                    VStack(alignment: .leading, spacing: 16) {
+                        LEDDeckView(store: store)
+                        OverviewAgentsView(store: store)
+                    }
                 }
             }
             .padding(.bottom, 8)
         }
         .scrollIndicators(.hidden)
+    }
+}
+
+struct OverviewSignalRoutesView: View {
+    @Bindable var store: CommandCenterStore
+
+    private var connectedCount: Int {
+        store.hardwareDevices.filter(\.connected).count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .foregroundStyle(.purple)
+                Text("Signal Routes")
+                    .font(.headline)
+                Text(routeSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Manage", systemImage: "arrow.right") {
+                    store.selectedSection = .hardware
+                }
+                .controlSize(.small)
+                .buttonStyle(.glass)
+            }
+
+            Divider()
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(store.hardwareDevices, id: \.kind) { device in
+                        OverviewSignalRouteRow(store: store, device: device)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                VStack(spacing: 8) {
+                    ForEach(store.hardwareDevices, id: \.kind) { device in
+                        OverviewSignalRouteRow(store: store, device: device)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    private var routeSummary: String {
+        let devices = "\(connectedCount) local output\(connectedCount == 1 ? "" : "s")"
+        guard store.nearbyDiscoveryEnabled else { return devices }
+        let macs = "\(store.nearbyPeers.count) nearby Mac\(store.nearbyPeers.count == 1 ? "" : "s")"
+        return "\(devices) · \(macs)"
+    }
+}
+
+private struct OverviewSignalRouteRow: View {
+    @Bindable var store: CommandCenterStore
+    let device: DeviceState
+
+    private var selectedSourceName: String {
+        switch store.signalSource(for: device.kind) {
+        case .thisMac:
+            return "This Mac"
+        case .allMacs:
+            return "All Macs"
+        case .nearbyMac(let peerID):
+            return store.nearbyPeers.first(where: { $0.id == peerID })?.displayName ?? "Unavailable Mac"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: device.connected ? "lightbulb.led.fill" : "lightbulb.led")
+                .foregroundStyle(device.connected ? .primary : .tertiary)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(selectedSourceName)
+                        .lineLimit(1)
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Text(device.name)
+                        .lineLimit(1)
+                }
+                .font(.subheadline.weight(.semibold))
+                Text(device.connected ? store.signalSourceStatus(for: device.kind) : "Connect to use this output")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Circle()
+                .fill(routeColor)
+                .frame(width: 7, height: 7)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.primary.opacity(0.035), in: .rect(cornerRadius: 10))
+    }
+
+    private var routeColor: Color {
+        guard device.connected else { return .secondary.opacity(0.45) }
+        return store.routedSignalSourceName(for: device.kind) == "No active signal" ? .orange : .green
     }
 }
 
@@ -475,7 +578,16 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     case general, profiles, battery, modes, connections, diagnostics
 
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    var title: String {
+        switch self {
+        case .general: "App"
+        case .profiles: "Profiles"
+        case .battery: "Battery"
+        case .modes: "Modes"
+        case .connections: "Integrations"
+        case .diagnostics: "Diagnostics"
+        }
+    }
 }
 
 struct SettingsView: View {
@@ -486,13 +598,13 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {
-                    Text("Settings").font(.title2.bold())
+                    Text("Preferences").font(.title2.bold())
                     Spacer(minLength: 8)
                     settingsPanePicker
                         .frame(width: 520)
                 }
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Settings").font(.title2.bold())
+                    Text("Preferences").font(.title2.bold())
                     settingsPanePicker
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -504,9 +616,8 @@ struct SettingsView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
                             SignalModeControl(store: store)
-                            NearbySignalNetworkCard(store: store)
                         }
-                            .frame(maxWidth: 520, alignment: .leading)
+                            .frame(maxWidth: 620, alignment: .leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .scrollIndicators(.hidden)
@@ -529,7 +640,7 @@ struct SettingsView: View {
     }
 
     private var settingsPanePicker: some View {
-        Picker("Settings", selection: $selectedPane) {
+        Picker("Preferences", selection: $selectedPane) {
             ForEach(SettingsPane.allCases) { pane in
                 Text(pane.title).tag(pane)
             }
@@ -551,67 +662,194 @@ struct NearbySignalNetworkCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 11) {
+            HStack(spacing: 10) {
                 Image(systemName: "network")
                     .font(.headline)
                     .foregroundStyle(.purple)
-                    .frame(width: 34, height: 34)
-                    .background(.purple.opacity(0.1), in: .rect(cornerRadius: 11))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Nearby Signal Network").font(.headline)
+                    .frame(width: 30, height: 30)
+                    .background(.purple.opacity(0.1), in: .rect(cornerRadius: 9))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Mac-to-Mac Signal").font(.headline)
                     Text(store.nearbyDisplayStatusMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 Spacer()
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 7, height: 7)
+                Label(relationshipLabel, systemImage: relationshipSymbol)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(statusColor)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(statusColor.opacity(0.1), in: .capsule)
             }
 
-            Toggle("Make this Mac available as a signal source", isOn: Binding(
-                get: { store.nearbySharingEnabled },
-                set: { store.setNearbySharingEnabled($0) }
-            ))
-            .toggleStyle(.switch)
+            HStack(spacing: 10) {
+                signalMacEndpoint(
+                    title: store.localMacDisplayName,
+                    detail: localMacDetail,
+                    symbol: "desktopcomputer"
+                )
 
-            Toggle("Discover signal sources on nearby Macs", isOn: Binding(
-                get: { store.nearbyDiscoveryEnabled },
-                set: { store.setNearbyDiscoveryEnabled($0) }
-            ))
-            .toggleStyle(.switch)
+                Image(systemName: relationshipSymbol)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(statusColor)
+                    .frame(width: 28)
 
-            Text("Each SidePulse chooses its own source on the Hardware page. Turning discovery off returns every output to This Mac.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                signalMacEndpoint(
+                    title: nearbyMacTitle,
+                    detail: nearbyMacDetail,
+                    symbol: "desktopcomputer.and.arrow.down"
+                )
+            }
 
-            if store.nearbyDiscoveryEnabled {
-                HStack(spacing: 6) {
-                    Image(systemName: "desktopcomputer")
-                    Text(store.nearbyPeers.isEmpty
-                        ? "No other SidePulse Macs discovered yet"
-                        : "\(store.nearbyPeers.count) nearby Mac\(store.nearbyPeers.count == 1 ? "" : "s") discovered")
-                    if let lastSignalAt = store.nearbyLastSignalAt {
-                        Text("·")
-                        Text(lastSignalAt, style: .relative)
+            if store.nearbyDiscoveryEnabled, !store.nearbyPeers.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(store.nearbyPeers) { peer in
+                        HStack(spacing: 9) {
+                            Circle()
+                                .fill(store.nearbyServiceSnapshot.readyOutboundPeerIDs.contains(peer.id) ? Color.green : Color.secondary.opacity(0.55))
+                                .frame(width: 7, height: 7)
+                            Text(peer.displayName)
+                                .font(.caption.weight(.semibold))
+                            Spacer()
+                            Text(store.nearbyServiceSnapshot.readyOutboundPeerIDs.contains(peer.id) ? "Connection ready" : "Available")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 7)
+                        if peer.id != store.nearbyPeers.last?.id { Divider() }
                     }
                 }
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .background(.primary.opacity(0.025), in: .rect(cornerRadius: 10))
+            }
+
+            Divider()
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 28) {
+                    networkToggles
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    networkToggles
+                }
             }
 
             Label(
-                store.nearbySharingEnabled
-                    ? "Local network only: shares compiled LED programs, state, and timing—not agent names, messages, projects, or paths."
-                    : "Nothing leaves this Mac unless nearby sharing is turned on.",
+                "Each local SidePulse chooses its source below. Mac-to-Mac sharing sends only compiled LED color, motion, and timing on your local network.",
                 systemImage: "lock.shield.fill"
             )
             .font(.caption2)
             .foregroundStyle(.tertiary)
         }
-        .padding(20)
-        .glassEffect(.regular.tint(.purple.opacity(0.055)), in: .rect(cornerRadius: 22))
+        .padding(16)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    @ViewBuilder
+    private var networkToggles: some View {
+        Toggle("Share this Mac", isOn: Binding(
+            get: { store.nearbySharingEnabled },
+            set: { store.setNearbySharingEnabled($0) }
+        ))
+        .toggleStyle(.switch)
+        .help("Let a SidePulse connected to another Mac use this Mac's signal")
+
+        Toggle("Find nearby Macs", isOn: Binding(
+            get: { store.nearbyDiscoveryEnabled },
+            set: { store.setNearbyDiscoveryEnabled($0) }
+        ))
+        .toggleStyle(.switch)
+        .help("Let this Mac route a local SidePulse from another Mac")
+    }
+
+    private func signalMacEndpoint(title: String, detail: String, symbol: String) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: symbol)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity)
+        .background(.primary.opacity(0.035), in: .rect(cornerRadius: 11))
+    }
+
+    private var nearbyMacTitle: String {
+        if store.nearbyServiceSnapshot.readyOutboundPeerIDs.count == 1,
+           let peerID = store.nearbyServiceSnapshot.readyOutboundPeerIDs.first,
+           let peer = store.nearbyPeers.first(where: { $0.id == peerID }) {
+            return peer.displayName
+        }
+        if store.nearbyPeers.count <= 1 { return "Nearby Macs" }
+        return "\(store.nearbyPeers.count) Nearby Macs"
+    }
+
+    private var localMacDetail: String {
+        let receivers = store.nearbyServiceSnapshot.inboundReceiverCount
+        if receivers > 0 {
+            return "Connected to \(receivers) nearby Mac\(receivers == 1 ? "" : "s")"
+        }
+        if store.nearbyServiceSnapshot.listenerReady { return "Available as a source" }
+        return store.nearbySharingEnabled ? "Starting local sharing" : "Local signal only"
+    }
+
+    private var nearbyMacDetail: String {
+        guard store.nearbyDiscoveryEnabled else { return "Discovery is off" }
+        let connected = store.nearbyServiceSnapshot.readyOutboundPeerIDs.count
+        if connected > 0 {
+            if let lastSignalAt = store.nearbyLastSignalAt {
+                return "Signal received \(lastSignalAt.formatted(.relative(presentation: .named)))"
+            }
+            return "\(connected) connection\(connected == 1 ? "" : "s") ready"
+        }
+        guard !store.nearbyPeers.isEmpty else { return "Searching on local network" }
+        if let lastSignalAt = store.nearbyLastSignalAt {
+            return "Signal received \(lastSignalAt.formatted(.relative(presentation: .named)))"
+        }
+        return "Available as signal sources"
+    }
+
+    private var relationshipLabel: String {
+        let outbound = store.nearbyServiceSnapshot.readyOutboundPeerIDs.count
+        let inbound = store.nearbyServiceSnapshot.inboundReceiverCount
+        if outbound > 0, inbound > 0 {
+            return "Both directions connected"
+        }
+        if outbound > 0 { return "Receiving from \(outbound)" }
+        if inbound > 0 { return "Sharing to \(inbound)" }
+        return switch (store.nearbySharingEnabled, store.nearbyDiscoveryEnabled) {
+        case (true, true): "Two-way enabled"
+        case (true, false): "Sharing enabled"
+        case (false, true): "Receiving enabled"
+        case (false, false): "Local only"
+        }
+    }
+
+    private var relationshipSymbol: String {
+        let outbound = !store.nearbyServiceSnapshot.readyOutboundPeerIDs.isEmpty
+        let inbound = store.nearbyServiceSnapshot.inboundReceiverCount > 0
+        if outbound && inbound { return "arrow.left.arrow.right" }
+        if outbound { return "arrow.left" }
+        if inbound { return "arrow.right" }
+        return switch (store.nearbySharingEnabled, store.nearbyDiscoveryEnabled) {
+        case (true, true): "arrow.left.arrow.right"
+        case (true, false): "arrow.right"
+        case (false, true): "arrow.left"
+        case (false, false): "minus"
+        }
     }
 
     private var statusColor: Color {
@@ -631,7 +869,7 @@ struct OverviewAgentsView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Agents").font(.title2.bold())
+                    Text("Agent Hub").font(.title2.bold())
                     Text("Open a session or view the full hub.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -988,7 +1226,7 @@ struct ActionCenterView: View {
             .buttonStyle(.glassProminent)
 
             Button {
-                store.selectedSection = .profiles
+                store.selectedSection = .settings
             } label: {
                 OverviewActionLabel(
                     title: "Choose a profile",
@@ -999,7 +1237,7 @@ struct ActionCenterView: View {
             .buttonStyle(.glass)
 
             Button {
-                store.selectedSection = .system
+                store.selectedSection = .settings
             } label: {
                 OverviewActionLabel(
                     title: "Manage connections",
@@ -1913,11 +2151,11 @@ struct HardwareView: View {
     @Bindable var store: CommandCenterStore
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("SidePulse Devices").font(.largeTitle.bold())
-                        Text("Every connected device is a standalone output. Choose its signal source and tune it independently.")
+                        Text("Devices & Macs").font(.largeTitle.bold())
+                        Text("Choose which Mac drives each SidePulse. Every device works as its own output.")
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -1928,24 +2166,44 @@ struct HardwareView: View {
                     .toggleStyle(.switch)
                 }
 
+                NearbySignalNetworkCard(store: store)
+
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Local Outputs")
+                        .font(.title2.bold())
+                    Spacer()
+                    Text("Source → SidePulse")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 ForEach(store.hardwareDevices, id: \.kind) { device in
                     HardwareDeviceCard(store: store, device: device)
                 }
 
                 EjectPreventionRow(store: store)
 
-                Label("The global power and max-brightness controls still apply to every output.", systemImage: "memorychip")
+                Label("Power and max brightness apply to every connected output on this Mac.", systemImage: "dial.high")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text("Local Compiled LED Scene").font(.headline)
-                Text(store.scene.program)
-                    .textSelection(.enabled)
-                    .font(.body.monospaced())
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.black.opacity(0.45), in: .rect(cornerRadius: 16))
+                DisclosureGroup("Developer details") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Local compiled LED scene")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(store.scene.program)
+                            .textSelection(.enabled)
+                            .font(.caption.monospaced())
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.black.opacity(0.45), in: .rect(cornerRadius: 10))
+                    }
+                    .padding(.top, 8)
+                }
+                .font(.caption)
             }
+            .padding(.bottom, 8)
         }
         .scrollIndicators(.hidden)
     }
@@ -2007,14 +2265,14 @@ struct HardwareDeviceCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
                 Image(systemName: device.connected ? "externaldrive.fill.badge.checkmark" : "externaldrive.fill")
-                    .font(.system(size: 34))
+                    .font(.title2)
                     .foregroundStyle(device.connected ? .green : .secondary)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 9) {
-                        Text(device.name).font(.title3.bold())
+                        Text(device.name).font(.headline)
                         Text("\(device.ledCount)-LED OUTPUT")
                             .font(.caption2.bold())
                             .foregroundStyle(device.connected ? .primary : .secondary)
@@ -2023,9 +2281,44 @@ struct HardwareDeviceCard: View {
                             .background(.white.opacity(device.connected ? 0.12 : 0.06), in: .capsule)
                     }
                     Text(device.connected ? "Connected · standalone" : "Ready for standalone use")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(device.connected ? Color.green : Color.secondary.opacity(0.5))
+                        .frame(width: 7, height: 7)
+                    Text(device.connected ? "Connected" : "Not connected")
+                }
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("SIGNAL SOURCE")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Text(selectedSourceName)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "arrow.right")
+                    .foregroundStyle(.tertiary)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("OUTPUT")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Text(device.name)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
                 Picker("Signal Source", selection: Binding(
                     get: { store.signalSource(for: kind) },
                     set: { store.selectSignalSource($0, for: kind) }
@@ -2042,11 +2335,13 @@ struct HardwareDeviceCard: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .frame(width: 180)
+                .frame(width: 154)
             }
+            .padding(11)
+            .background(.primary.opacity(0.035), in: .rect(cornerRadius: 11))
 
             HStack(spacing: 8) {
-                Label(store.signalSourceStatus(for: kind), systemImage: "point.3.connected.trianglepath.dotted")
+                Label(routeStatusTitle, systemImage: routeStatusSymbol)
                 if !store.nearbyDiscoveryEnabled,
                    store.signalSource(for: kind).needsNearbySignals {
                     Text("· discovery required")
@@ -2056,17 +2351,10 @@ struct HardwareDeviceCard: View {
             .foregroundStyle(.secondary)
 
             Text(kind == .pro
-                ? "Full eight-LED rendering for local, nearby, or combined agent activity."
-                : "The same agent states rendered independently across two LEDs—no Pro required.")
+                ? "Eight-LED SidePulse Pro output for local, nearby, or combined activity."
+                : "Two-LED SidePulse Dot output. It works independently; a Pro is not required.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-
-            if device.connected {
-                Text(device.path)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.tertiary)
-                    .textSelection(.enabled)
-            }
 
             if let error = device.lastError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -2080,7 +2368,7 @@ struct HardwareDeviceCard: View {
 
             Divider()
 
-            DisclosureGroup("Output calibration", isExpanded: $showsCalibration) {
+            DisclosureGroup("Output calibration & details", isExpanded: $showsCalibration) {
                 VStack(alignment: .leading, spacing: 12) {
                     calibrationSlider(
                         title: "Device brightness",
@@ -2107,12 +2395,41 @@ struct HardwareDeviceCard: View {
                         .buttonStyle(.borderless)
                         .disabled(calibration == kind.defaultOutputCalibration)
                     }
+                    if device.connected {
+                        Divider()
+                        LabeledContent("Mount", value: device.path)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.tertiary)
+                            .textSelection(.enabled)
+                    }
                 }
                 .padding(.top, 10)
             }
         }
-        .padding(22)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .padding(16)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    private var selectedSourceName: String {
+        switch store.signalSource(for: kind) {
+        case .thisMac:
+            return store.localMacDisplayName
+        case .allMacs:
+            return "Best signal from all Macs"
+        case .nearbyMac(let peerID):
+            return store.nearbyPeers.first(where: { $0.id == peerID })?.displayName ?? "Unavailable Mac"
+        }
+    }
+
+    private var routeStatusTitle: String {
+        guard device.connected else { return "Route saved · connect this SidePulse to use it" }
+        return store.signalSourceStatus(for: kind)
+    }
+
+    private var routeStatusSymbol: String {
+        guard device.connected else { return "externaldrive" }
+        if store.routedSignalSourceName(for: kind) == "No active signal" { return "pause.circle" }
+        return "point.3.connected.trianglepath.dotted"
     }
 
     @ViewBuilder
@@ -2163,7 +2480,7 @@ struct ConnectionsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Connections").font(.largeTitle.bold())
+                        Text("Agent Integrations").font(.largeTitle.bold())
                         Text("Agent integrations that provide live SidePulse status.")
                             .foregroundStyle(.secondary)
                     }
