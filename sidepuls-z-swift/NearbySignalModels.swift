@@ -24,9 +24,9 @@ enum NearbyMirroringMode: String, Codable, CaseIterable, Identifiable, Sendable 
         case .shareThisMac:
             "Keep showing this Mac locally and make its light signal available to nearby Macs."
         case .followNearbyMac:
-            "Show the exact light program from one selected nearby Mac."
+            "Show one selected nearby Mac only while this Mac has no local agent activity."
         case .allMacs:
-            "Share this Mac and show the highest-priority fresh signal across every discovered Mac."
+            "Share this Mac and use the highest-priority nearby signal only while this Mac is idle."
         }
     }
 
@@ -361,11 +361,18 @@ enum NearbySignalRouter {
         case .thisMac:
             return localRoute(localFrame)
         case .nearbyMac(let selectedPeerID):
+            // A SidePulse belongs to the Mac it is physically attached to.
+            // Nearby mirroring is a fallback, never a competitor for active
+            // local agent state (including alerts waiting for acknowledgement).
+            if localFrame.hasVisibleActivity {
+                return localRoute(localFrame)
+            }
             guard let signal = receivedSignals[selectedPeerID],
                   signal.frame.sourceNodeID != localFrame.sourceNodeID,
+                  signal.frame.hasVisibleActivity,
                   signal.isFresh(at: now)
             else {
-                return localFrame.hasVisibleActivity ? localRoute(localFrame) : nil
+                return nil
             }
             return RoutedNearbySignal(
                 frame: signal.frame,
@@ -373,11 +380,11 @@ enum NearbySignalRouter {
                 isRemote: true
             )
         case .allMacs:
-            var candidates = [RoutedNearbySignal]()
             if localFrame.hasVisibleActivity {
-                candidates.append(localRoute(localFrame))
+                return localRoute(localFrame)
             }
-            candidates.append(contentsOf: receivedSignals.values.compactMap { signal in
+
+            let candidates = receivedSignals.values.compactMap { signal -> RoutedNearbySignal? in
                 guard signal.frame.sourceNodeID != localFrame.sourceNodeID,
                       signal.frame.hasVisibleActivity,
                       signal.isFresh(at: now)
@@ -387,7 +394,7 @@ enum NearbySignalRouter {
                     clockOrigin: signal.localClockOrigin,
                     isRemote: true
                 )
-            })
+            }
 
             return candidates.min { lhs, rhs in
                 if lhs.frame.aggregateState.priority != rhs.frame.aggregateState.priority {
@@ -412,6 +419,9 @@ enum NearbySignalRouter {
         case .off, .shareThisMac:
             return localRoute(localFrame)
         case .followNearbyMac:
+            if localFrame.hasVisibleActivity {
+                return localRoute(localFrame)
+            }
             guard let selectedPeerID else { return nil }
             return route(
                 source: .nearbyMac(selectedPeerID),

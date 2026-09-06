@@ -25,7 +25,7 @@ SidePulse Z is a native macOS app for seeing what your AI coding agents are doin
 - Adds Progress in Lighting Studio: run a command or watch an existing process, with customizable running, finished, and failed signals.
 - Drives SidePulse Pro and SidePulse Dot as standalone outputs; neither device requires the other.
 - Keeps SidePulse Pro mounted through software eject attempts after lock or hibernate.
-- Lets each SidePulse use this Mac, one nearby Mac, or all discovered Macs over Bonjour.
+- Lets each SidePulse use local agents first, then fall back to one or all nearby Macs over Bonjour while local agents are idle.
 - Filters internal child-agent noise while keeping top-level sessions accessible.
 
 ## Build and run
