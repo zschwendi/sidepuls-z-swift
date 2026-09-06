@@ -6,6 +6,12 @@ import UniformTypeIdentifiers
 
 enum CommandCenterSection: String, CaseIterable, Identifiable {
     case overview, lighting, agents, hardware, settings
+#if PEEL_WORKSPACE
+    case usage
+#endif
+#if PEEL_HOST_INTEGRATION
+    case host, mechanic
+#endif
 
     var id: String { rawValue }
     var title: String {
@@ -15,6 +21,13 @@ enum CommandCenterSection: String, CaseIterable, Identifiable {
         case .agents: "Agent Hub"
         case .hardware: "Devices & Macs"
         case .settings: "Preferences"
+#if PEEL_WORKSPACE
+        case .usage: "Usage"
+#endif
+#if PEEL_HOST_INTEGRATION
+        case .host: "Host"
+        case .mechanic: "Mechanic"
+#endif
         }
     }
 
@@ -25,6 +38,13 @@ enum CommandCenterSection: String, CaseIterable, Identifiable {
         case .agents: "cpu.fill"
         case .hardware: "point.3.connected.trianglepath.dotted"
         case .settings: "gearshape.fill"
+#if PEEL_WORKSPACE
+        case .usage: "gauge.with.dots.needle.50percent"
+#endif
+#if PEEL_HOST_INTEGRATION
+        case .host: "rectangle.on.rectangle"
+        case .mechanic: "wrench.and.screwdriver"
+#endif
         }
     }
 }
@@ -168,6 +188,14 @@ final class CommandCenterStore {
     @ObservationIgnored private var utilityTerminationObserver: NSObjectProtocol?
 
     init() {
+#if PEEL_WORKSPACE
+        if ProcessInfo.processInfo.arguments.contains("--peel-preview") {
+            agents = []
+            isShowingPreviewData = false
+            runtimeMessage = "Preview — live agent and device connections are paused"
+            return
+        }
+#endif
         if let saved = ProfileLibrary.load(), !saved.profiles.isEmpty {
             profiles = saved.profiles
             selectedProfileID = saved.profiles.contains(where: { $0.id == saved.selectedProfileID })
@@ -948,6 +976,13 @@ final class CommandCenterStore {
     }
 
     private var nearbyServiceConfiguration: NearbySignalServiceConfiguration {
+#if PEEL_HOST_INTEGRATION
+        // Cross-device signals must use the Host's authenticated peer transport.
+        return NearbySignalServiceConfiguration(
+            sharesLocalSignal: false, discoversPeers: false,
+            followedPeerIDs: [], followsAllPeers: false
+        )
+#else
         let sources = [proSignalSource, dotSignalSource]
         return NearbySignalServiceConfiguration(
             sharesLocalSignal: nearbySharingEnabled,
@@ -955,6 +990,7 @@ final class CommandCenterStore {
             followedPeerIDs: Set(sources.compactMap(\.selectedPeerID)),
             followsAllPeers: sources.contains(.allMacs)
         )
+#endif
     }
 
     private func updateNearbyStaleMonitor() {

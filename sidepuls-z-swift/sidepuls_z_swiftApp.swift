@@ -2,6 +2,7 @@ import AppKit
 import QuartzCore
 import SwiftUI
 
+#if !PEEL_HOST_INTEGRATION
 @main
 enum SidePulseMain {
     static func main() {
@@ -9,6 +10,8 @@ enum SidePulseMain {
         SidePulseCommandCenterApp.main()
     }
 }
+
+#endif
 
 struct SidePulseCommandCenterApp: App {
     @State private var store: CommandCenterStore
@@ -22,10 +25,17 @@ struct SidePulseCommandCenterApp: App {
     }
 
     var body: some Scene {
+#if PEEL_WORKSPACE
+        WindowGroup("Peel", id: "command-center") {
+            CommandCenterRootView(store: store, menuBarController: menuBarController)
+        }
+        .defaultSize(width: 1040, height: 720)
+#else
         WindowGroup("SidePulse Command Center", id: "command-center") {
             CommandCenterRootView(store: store, menuBarController: menuBarController)
         }
         .defaultSize(width: 940, height: 640)
+#endif
     }
 }
 
@@ -43,7 +53,7 @@ private struct CommandCenterRootView: View {
     }
 }
 
-private struct CommandCenterWindowReader: NSViewRepresentable {
+struct CommandCenterWindowReader: NSViewRepresentable {
     let register: (NSWindow) -> Void
 
     func makeNSView(context: Context) -> WindowReaderView {
@@ -67,8 +77,14 @@ private final class NotchIslandHostingView: NSHostingView<NotchIslandView> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
+#if PEEL_HOST_INTEGRATION
+private final class PeelNotchHostingView: NSHostingView<AnyView> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+#endif
+
 @MainActor
-private final class SidePulseMenuBarController: NSObject {
+final class SidePulseMenuBarController: NSObject {
     private let store: CommandCenterStore
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
@@ -88,6 +104,9 @@ private final class SidePulseMenuBarController: NSObject {
     private weak var commandCenterWindow: NSWindow?
     private var commandCenterRequested = false
     var createCommandCenter: (() -> Void)?
+#if PEEL_HOST_INTEGRATION
+    private var hasUnifiedPresentation = false
+#endif
 
     init(store: CommandCenterStore) {
         self.store = store
@@ -103,7 +122,11 @@ private final class SidePulseMenuBarController: NSObject {
             button.action = #selector(togglePopover(_:))
             button.image = nil
             button.imagePosition = .noImage
+#if PEEL_WORKSPACE
+            button.setAccessibilityLabel("Peel")
+#else
             button.setAccessibilityLabel("SidePulse")
+#endif
             iconView.translatesAutoresizingMaskIntoConstraints = false
             button.addSubview(iconView)
             NSLayoutConstraint.activate([
@@ -177,6 +200,59 @@ private final class SidePulseMenuBarController: NSObject {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
+#if PEEL_HOST_INTEGRATION
+    func installUnifiedPresentation(menu: AnyView, notch: AnyView, label: AnyView) {
+        guard !hasUnifiedPresentation, let button = statusItem.button else { return }
+        hasUnifiedPresentation = true
+        statusItem.autosaveName = "PeelHostStatusItem"
+        button.setAccessibilityLabel("Peel AI: Host, SidePulse, usage and system status")
+        let hostingController = NSHostingController(rootView: menu)
+        hostingController.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = hostingController
+        notchDisplay.setIslandContent(PeelNotchHostingView(rootView: notch))
+
+        iconView.removeFromSuperview()
+        let brand = NSImageView()
+        brand.image = NSImage(named: "PeelHostMenuBarIcon_66x66")
+            ?? NSImage(systemSymbolName: "rectangle.on.rectangle", accessibilityDescription: "Peel AI")
+        brand.image?.isTemplate = true
+        brand.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            brand.widthAnchor.constraint(equalToConstant: 18),
+            brand.heightAnchor.constraint(equalToConstant: 18)
+        ])
+        let summary = NSHostingView(rootView: label)
+        summary.sizingOptions = [.intrinsicContentSize]
+        let stack = NSStackView(views: [brand, iconView, summary])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        button.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 4),
+            stack.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -4),
+            stack.centerYAnchor.constraint(equalTo: button.centerYAnchor)
+        ])
+        NotificationCenter.default.addObserver(self, selector: #selector(presentationChanged),
+                                               name: UserDefaults.didChangeNotification, object: nil)
+        refreshIconSource()
+    }
+
+    private func refreshUnifiedBarSize() {
+        guard hasUnifiedPresentation else { return }
+        let defaults = UserDefaults.standard
+        func enabled(_ key: String) -> Bool { defaults.object(forKey: key) as? Bool ?? true }
+        iconView.isHidden = !enabled("peel.bar.showLEDs")
+        var width: CGFloat = 28
+        if !iconView.isHidden { width += MenuBarDotAnimationView.preferredSize.width + 6 }
+        if enabled("peel.bar.showUsage") { width += 90 }
+        if enabled("peel.bar.showGauge") { width += 24 }
+        if enabled("peel.bar.showTopApp") { width += 80 }
+        statusItem.length = width
+    }
+#endif
+
     @objc private func displayLinkDidFire(_ displayLink: CADisplayLink) {
         renderIconFrame()
     }
@@ -201,7 +277,12 @@ private final class SidePulseMenuBarController: NSObject {
     }
 
     private func refreshIconSource() {
+#if PEEL_HOST_INTEGRATION
+        notchDisplay.setIslandContentHeight(hasUnifiedPresentation ? 360 : NotchIslandView.contentHeight(agentCount: store.notchDrivingAgents.count))
+        refreshUnifiedBarSize()
+#else
         notchDisplay.setIslandContentHeight(NotchIslandView.contentHeight(agentCount: store.notchDrivingAgents.count))
+#endif
         notchDisplay.update(
             enabled: store.notchEnabled,
             program: store.softwareDisplayProgram,
@@ -224,7 +305,11 @@ private final class SidePulseMenuBarController: NSObject {
         renderedClockOrigin = store.softwareDisplayClockOrigin
         renderedIconStyle = store.menuBarIconStyle
         renderIconFrame()
+#if PEEL_HOST_INTEGRATION
+        let toolTip = "Peel AI · \(store.agents.count) agent sessions · Host, usage and system controls"
+#else
         let toolTip = "SidePulse · \(store.agents.count) session\(store.agents.count == 1 ? "" : "s")"
+#endif
         if button.toolTip != toolTip {
             button.toolTip = toolTip
         }
@@ -245,6 +330,10 @@ private final class SidePulseMenuBarController: NSObject {
     }
 
     private func refreshStatusItemVisibility() {
+#if PEEL_HOST_INTEGRATION
+        refreshUnifiedBarSize()
+        let visible = UserDefaults.standard.object(forKey: "showMenuBarIcon") as? Bool ?? true
+#else
         let presentation = NSApp.currentSystemPresentationOptions
         let autoHidden = !presentation.intersection([.fullScreen, .autoHideMenuBar, .hideMenuBar]).isEmpty
         let visible = store.menuBarVisibilityMode.shouldShow(
@@ -252,6 +341,7 @@ private final class SidePulseMenuBarController: NSObject {
             menuBarAutoHidden: autoHidden,
             keepWhenAutoHidden: store.menuBarKeepWhenAutoHidden
         )
+#endif
         guard lastRequestedVisibility != visible else { return }
         lastRequestedVisibility = visible
         if !visible { popover.performClose(nil) }
@@ -275,7 +365,7 @@ private final class SidePulseMenuBarController: NSObject {
         displayLink?.isPaused = !(renderedProgram?.needsAnimationFrame(at: elapsed) ?? false)
     }
 
-    private func openCommandCenter() {
+    func openCommandCenter() {
         popover.performClose(nil)
         notchDisplay.collapse()
         commandCenterRequested = true
@@ -418,7 +508,9 @@ struct SidePulseMenuBarView: View {
             Button("Open Command Center", systemImage: "slider.horizontal.3") {
                 openCommandCenter()
             }
+#if !PEEL_HOST_INTEGRATION
             Button("Quit SidePulse", systemImage: "power") { NSApp.terminate(nil) }
+#endif
         }
         .padding(12)
         .frame(width: 280)

@@ -3,6 +3,13 @@ import SwiftUI
 
 struct ContentView: View {
     @Bindable var store: CommandCenterStore
+#if PEEL_HOST_INTEGRATION
+    @Environment(PeelUnifiedModel.self) private var peel
+    var peelHostContent: AnyView? = nil
+    private var usageStore: PeelUsageStore { peel.usage }
+#elseif PEEL_WORKSPACE
+    @State private var usageStore = PeelUsageStore()
+#endif
 
     var body: some View {
         NavigationSplitView {
@@ -17,20 +24,51 @@ struct ContentView: View {
             .toolbar { toolbar }
         }
         .frame(minWidth: 880, minHeight: 580)
+#if PEEL_WORKSPACE
+        .onAppear {
+            usageStore.startPresentation()
+            if ProcessInfo.processInfo.arguments.contains("--peel-preview") {
+#if !PEEL_HOST_INTEGRATION
+                store.selectedSection = .usage
+#endif
+            }
+        }
+#if !PEEL_HOST_INTEGRATION
+        .onDisappear { usageStore.stopPresentation() }
+#endif
+#endif
     }
 
     private var sidebar: some View {
         List(selection: $store.selectedSection) {
+#if PEEL_HOST_INTEGRATION
+            Section("Peel AI") {
+                Label(CommandCenterSection.host.title, systemImage: CommandCenterSection.host.symbol)
+                    .tag(CommandCenterSection.host)
+            }
+#endif
             Section {
                 Label(CommandCenterSection.overview.title, systemImage: CommandCenterSection.overview.symbol)
                     .tag(CommandCenterSection.overview)
                 Label(CommandCenterSection.agents.title, systemImage: CommandCenterSection.agents.symbol)
                     .tag(CommandCenterSection.agents)
+#if PEEL_WORKSPACE && !PEEL_HOST_INTEGRATION
+                Label(CommandCenterSection.usage.title, systemImage: CommandCenterSection.usage.symbol)
+                    .tag(CommandCenterSection.usage)
+#endif
                 Label(CommandCenterSection.lighting.title, systemImage: CommandCenterSection.lighting.symbol)
                     .tag(CommandCenterSection.lighting)
                 Label(CommandCenterSection.hardware.title, systemImage: CommandCenterSection.hardware.symbol)
                     .tag(CommandCenterSection.hardware)
             }
+#if PEEL_HOST_INTEGRATION
+            Section("Usage & System") {
+                Label(CommandCenterSection.usage.title, systemImage: CommandCenterSection.usage.symbol)
+                    .tag(CommandCenterSection.usage)
+                Label(CommandCenterSection.mechanic.title, systemImage: CommandCenterSection.mechanic.symbol)
+                    .tag(CommandCenterSection.mechanic)
+            }
+#endif
             Section {
                 Label(CommandCenterSection.settings.title, systemImage: CommandCenterSection.settings.symbol)
                     .tag(CommandCenterSection.settings)
@@ -46,6 +84,17 @@ struct ContentView: View {
         case .agents: AgentsView(store: store)
         case .hardware: HardwareView(store: store)
         case .settings: SettingsView(store: store)
+#if PEEL_WORKSPACE
+        case .usage: PeelUsageView(store: usageStore)
+#endif
+#if PEEL_HOST_INTEGRATION
+        case .host:
+            ScrollView { peelHostContent }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .mechanic:
+            PeelMechanicSurface(processSampler: peel.sampler, systemMetrics: peel.systemMetrics,
+                                presentation: .controlPanel)
+#endif
         }
     }
 
