@@ -710,6 +710,14 @@ struct NearbySignalNetworkCard: View {
     @Bindable var store: CommandCenterStore
 
     var body: some View {
+#if PEEL_HOST_INTEGRATION
+        PeelTrustedSignalsCard()
+#else
+        legacyNetworkBody
+#endif
+    }
+
+    private var legacyNetworkBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 Image(systemName: "network")
