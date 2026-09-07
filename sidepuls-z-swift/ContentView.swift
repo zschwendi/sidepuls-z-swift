@@ -217,6 +217,11 @@ private struct OverviewSignalRouteRow: View {
         }
     }
 
+    private var activeSourceName: String {
+        let routed = store.routedSignalSourceName(for: device.kind)
+        return routed == "No active signal" ? selectedSourceName : routed
+    }
+
     var body: some View {
         HStack(spacing: 9) {
             Image(systemName: device.connected ? "lightbulb.led.fill" : "lightbulb.led")
@@ -224,7 +229,7 @@ private struct OverviewSignalRouteRow: View {
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    Text(selectedSourceName)
+                    Text(activeSourceName)
                         .lineLimit(1)
                     Image(systemName: "arrow.right")
                         .font(.caption2)
@@ -2371,7 +2376,7 @@ struct HardwareDeviceCard: View {
 
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("SIGNAL SOURCE")
+                    Text(store.signalSource(for: kind).needsNearbySignals ? "IDLE FALLBACK" : "SIGNAL SOURCE")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
                     Text(selectedSourceName)
@@ -2489,7 +2494,7 @@ struct HardwareDeviceCard: View {
         case .thisMac:
             return store.localMacDisplayName
         case .allMacs:
-            return "Best signal from all Macs"
+            return "Nearby Macs"
         case .nearbyMac(let peerID):
             return store.nearbyPeers.first(where: { $0.id == peerID })?.displayName ?? "Unavailable Mac"
         }

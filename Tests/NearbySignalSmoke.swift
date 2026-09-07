@@ -173,37 +173,77 @@ enum NearbySignalSmoke {
         ))
         precondition(outboundRoute.frame.sourceNodeID == localID)
 
-        let followed = try require(NearbySignalRouter.route(
+        let followedWithLocalActivity = try require(NearbySignalRouter.route(
             mode: .followNearbyMac,
             selectedPeerID: remoteID,
             localFrame: local,
             receivedSignals: receipts,
             now: now
         ))
-        precondition(followed.frame.sourceNodeID == remoteID)
-        precondition(followed.isRemote)
-        precondition(abs(followed.clockOrigin.timeIntervalSince(now.addingTimeInterval(-2))) < 0.001)
+        precondition(followedWithLocalActivity.frame.sourceNodeID == localID)
+        precondition(!followedWithLocalActivity.isRemote)
 
-        let allMacs = try require(NearbySignalRouter.route(
+        let followedWithoutSelection = try require(NearbySignalRouter.route(
+            mode: .followNearbyMac,
+            selectedPeerID: nil,
+            localFrame: local,
+            receivedSignals: receipts,
+            now: now
+        ))
+        precondition(followedWithoutSelection.frame.sourceNodeID == localID)
+        precondition(!followedWithoutSelection.isRemote)
+
+        let allMacsWithLocalActivity = try require(NearbySignalRouter.route(
             mode: .allMacs,
             selectedPeerID: nil,
             localFrame: local,
             receivedSignals: receipts,
             now: now
         ))
-        precondition(allMacs.frame.sourceNodeID == remoteID, "Approval must outrank thinking")
+        precondition(
+            allMacsWithLocalActivity.frame.sourceNodeID == localID,
+            "Local activity must outrank a higher-priority nearby state"
+        )
+
+        for state in AgentState.allCases where state != .idle {
+            var visibleLocal = local
+            visibleLocal.aggregateState = state
+            visibleLocal.hasVisibleActivity = true
+            for source in [SidePulseSignalSource.nearbyMac(remoteID), .allMacs] {
+                let routed = try require(NearbySignalRouter.route(
+                    source: source,
+                    localFrame: visibleLocal,
+                    receivedSignals: receipts,
+                    now: now
+                ))
+                precondition(
+                    routed.frame.sourceNodeID == localID && !routed.isRemote,
+                    "Every visible local state must keep ownership of the local output"
+                )
+            }
+            for mode in [NearbyMirroringMode.followNearbyMac, .allMacs] {
+                let routed = try require(NearbySignalRouter.route(
+                    mode: mode,
+                    selectedPeerID: remoteID,
+                    localFrame: visibleLocal,
+                    receivedSignals: receipts,
+                    now: now
+                ))
+                precondition(routed.frame.sourceNodeID == localID && !routed.isRemote)
+            }
+        }
 
         var finished = remote
         finished.aggregateState = .completed
         let finishedReceipt = ReceivedNearbySignal(peerID: remoteID, frame: finished, receivedAt: now)
-        let thinkingWins = try require(NearbySignalRouter.route(
+        let localStillWins = try require(NearbySignalRouter.route(
             mode: .allMacs,
             selectedPeerID: nil,
             localFrame: local,
             receivedSignals: [remoteID: finishedReceipt],
             now: now
         ))
-        precondition(thinkingWins.frame.sourceNodeID == localID, "Thinking must outrank finished")
+        precondition(localStillWins.frame.sourceNodeID == localID)
 
         let staleReceipt = ReceivedNearbySignal(
             peerID: remoteID,
@@ -233,6 +273,19 @@ enum NearbySignalSmoke {
             now: now
         ) == nil, "A missing remote source stays off without local activity")
 
+        precondition(NearbySignalRouter.route(
+            source: .nearbyMac(remoteID),
+            localFrame: inactiveLocal,
+            receivedSignals: [remoteID: staleReceipt],
+            now: now
+        ) == nil, "A stale selected peer must not drive an idle local Mac")
+        precondition(NearbySignalRouter.route(
+            source: .allMacs,
+            localFrame: inactiveLocal,
+            receivedSignals: [remoteID: staleReceipt],
+            now: now
+        ) == nil, "A stale nearby pool must not drive an idle local Mac")
+
         var idleRemote = remote
         idleRemote.aggregateState = .idle
         idleRemote.hasVisibleActivity = false
@@ -243,14 +296,21 @@ enum NearbySignalSmoke {
             frame: idleRemote,
             receivedAt: now
         )
-        let followedIdleRemote = try require(NearbySignalRouter.route(
+        let localWinsOverIdleRemote = try require(NearbySignalRouter.route(
             source: .nearbyMac(remoteID),
             localFrame: local,
             receivedSignals: [remoteID: idleRemoteReceipt],
             now: now
         ))
-        precondition(followedIdleRemote.frame.sourceNodeID == remoteID)
-        precondition(followedIdleRemote.isRemote, "A fresh idle source must not trigger fallback")
+        precondition(localWinsOverIdleRemote.frame.sourceNodeID == localID)
+        precondition(!localWinsOverIdleRemote.isRemote)
+
+        precondition(NearbySignalRouter.route(
+            source: .nearbyMac(remoteID),
+            localFrame: inactiveLocal,
+            receivedSignals: [remoteID: idleRemoteReceipt],
+            now: now
+        ) == nil, "An idle Mac must not mirror another idle Mac")
 
         precondition(NearbySignalRouter.route(
             source: .allMacs,
@@ -266,6 +326,41 @@ enum NearbySignalSmoke {
             now: now
         ))
         precondition(remoteOnly.frame.sourceNodeID == remoteID)
+
+        let secondRemoteID = UUID().uuidString.lowercased()
+        let thinkingRemote = frame(
+            nodeID: secondRemoteID,
+            state: .working,
+            program: "brightness 255\n0:#FF00FF",
+            at: now.addingTimeInterval(-1)
+        )
+        let remotePriority = try require(NearbySignalRouter.route(
+            source: .allMacs,
+            localFrame: inactiveLocal,
+            receivedSignals: [
+                remoteID: receipt,
+                secondRemoteID: ReceivedNearbySignal(
+                    peerID: secondRemoteID,
+                    frame: thinkingRemote,
+                    receivedAt: now
+                ),
+            ],
+            now: now
+        ))
+        precondition(
+            remotePriority.frame.sourceNodeID == remoteID,
+            "Nearby priority still applies while the local Mac is idle"
+        )
+
+        let followedRemoteOnly = try require(NearbySignalRouter.route(
+            source: .nearbyMac(remoteID),
+            localFrame: inactiveLocal,
+            receivedSignals: receipts,
+            now: now
+        ))
+        precondition(followedRemoteOnly.frame.sourceNodeID == remoteID)
+        precondition(followedRemoteOnly.isRemote)
+        precondition(abs(followedRemoteOnly.clockOrigin.timeIntervalSince(now.addingTimeInterval(-2))) < 0.001)
 
         let unionConfiguration = NearbySignalServiceConfiguration(
             sharesLocalSignal: true,
@@ -310,7 +405,7 @@ enum NearbySignalSmoke {
             now: now
         ) == nil)
 
-        print("Nearby signal smoke passed: strict programs, peer-device sources, conditional local fallback, priority, loop rejection, and staleness")
+        print("Nearby signal smoke passed: strict programs, local-first fallback, peer-device sources, priority, loop rejection, and staleness")
     }
 
     private static func frame(
@@ -346,7 +441,7 @@ enum NearbySignalSmoke {
             receivedAt: now
         )
         let receivedSignals = [remoteID: remoteReceipt]
-        let decisions: [(
+        let localPriorityDecisions: [(
             source: SidePulseSignalSource,
             kind: SidePulseDeviceKind,
             expectedSourceNodeID: String,
@@ -354,13 +449,13 @@ enum NearbySignalSmoke {
             expectedRemote: Bool
         )] = [
             (.thisMac, .dot, localFrame.sourceNodeID, localFrame.dotProgram, false),
-            (.nearbyMac(remoteID), .pro, remoteID, remoteFrame.proProgram, true),
-            (.nearbyMac(remoteID), .dot, remoteID, remoteFrame.dotProgram, true),
-            (.allMacs, .pro, remoteID, remoteFrame.proProgram, true),
-            (.allMacs, .dot, remoteID, remoteFrame.dotProgram, true),
+            (.nearbyMac(remoteID), .pro, localFrame.sourceNodeID, localFrame.proProgram, false),
+            (.nearbyMac(remoteID), .dot, localFrame.sourceNodeID, localFrame.dotProgram, false),
+            (.allMacs, .pro, localFrame.sourceNodeID, localFrame.proProgram, false),
+            (.allMacs, .dot, localFrame.sourceNodeID, localFrame.dotProgram, false),
         ]
 
-        for decision in decisions {
+        for decision in localPriorityDecisions {
             let routed = try require(NearbySignalRouter.route(
                 source: decision.source,
                 localFrame: localFrame,
@@ -370,6 +465,29 @@ enum NearbySignalSmoke {
             precondition(routed.frame.sourceNodeID == decision.expectedSourceNodeID)
             precondition(routed.frame.program(for: decision.kind) == decision.expectedProgram)
             precondition(routed.isRemote == decision.expectedRemote)
+        }
+
+        var inactiveLocalFrame = localFrame
+        inactiveLocalFrame.aggregateState = .idle
+        inactiveLocalFrame.hasVisibleActivity = false
+        inactiveLocalFrame.proProgram = "off"
+        inactiveLocalFrame.dotProgram = "off"
+        let remoteFallbackDecisions: [(SidePulseSignalSource, SidePulseDeviceKind, String)] = [
+            (.nearbyMac(remoteID), .pro, remoteFrame.proProgram),
+            (.nearbyMac(remoteID), .dot, remoteFrame.dotProgram),
+            (.allMacs, .pro, remoteFrame.proProgram),
+            (.allMacs, .dot, remoteFrame.dotProgram),
+        ]
+        for (source, kind, expectedProgram) in remoteFallbackDecisions {
+            let routed = try require(NearbySignalRouter.route(
+                source: source,
+                localFrame: inactiveLocalFrame,
+                receivedSignals: receivedSignals,
+                now: now
+            ))
+            precondition(routed.frame.sourceNodeID == remoteID)
+            precondition(routed.frame.program(for: kind) == expectedProgram)
+            precondition(routed.isRemote)
         }
     }
 

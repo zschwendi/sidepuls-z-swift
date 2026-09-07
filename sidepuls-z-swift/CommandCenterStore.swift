@@ -390,14 +390,26 @@ final class CommandCenterStore {
             return hasLocalVisibleActivity ? "This Mac · active" : "This Mac · waiting for local activity"
         case .nearbyMac(let peerID):
             let name = nearbyPeers.first(where: { $0.id == peerID })?.displayName ?? "Nearby Mac"
-            if let signal = receivedNearbySignals[peerID], signal.isFresh(at: .now) {
+            if hasLocalVisibleActivity {
+                return "This Mac active · \(name) fallback paused"
+            }
+            if let signal = receivedNearbySignals[peerID],
+               signal.frame.hasVisibleActivity,
+               signal.isFresh(at: .now) {
                 return "Following \(name)"
             }
-            return hasLocalVisibleActivity
-                ? "\(name) unavailable · using local activity"
-                : "\(name) unavailable · waiting"
+            if let signal = receivedNearbySignals[peerID], signal.isFresh(at: .now) {
+                return "\(name) is idle · waiting"
+            }
+            return "\(name) unavailable · waiting"
         case .allMacs:
-            return "All Macs · showing \(routedSignalSourceName(for: kind))"
+            if hasLocalVisibleActivity {
+                return "This Mac active · nearby fallback paused"
+            }
+            let routedSource = routedSignalSourceName(for: kind)
+            return routedSource == "No active signal"
+                ? "All Macs · waiting for activity"
+                : "All Macs · showing \(routedSource)"
         }
     }
 
