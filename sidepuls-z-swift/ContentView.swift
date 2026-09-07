@@ -42,7 +42,7 @@ struct ContentView: View {
     private var sidebar: some View {
         List(selection: $store.selectedSection) {
 #if PEEL_HOST_INTEGRATION
-            Section("Peel AI") {
+            Section("Peel") {
                 Label(CommandCenterSection.host.title, systemImage: CommandCenterSection.host.symbol)
                     .tag(CommandCenterSection.host)
             }
