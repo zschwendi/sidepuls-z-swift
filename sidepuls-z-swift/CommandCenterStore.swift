@@ -78,6 +78,7 @@ final class CommandCenterStore {
     }
     var hardwareDevices: [DeviceState] { [proDevice, dotDevice] }
     var batteryState: BatteryState?
+    @ObservationIgnored private(set) var batterySampledAt: Date?
     var batterySettings = AppPreferences.batteryIndicatorSettings()
     var agentDisplayMode = AppPreferences.agentDisplayMode()
     var menuBarIconStyle = AppPreferences.menuBarIconStyle()
@@ -122,6 +123,7 @@ final class CommandCenterStore {
     var nearbyStatusMessage = "Nearby network is off"
     private(set) var nearbyServiceSnapshot = NearbySignalServiceSnapshot.localOnly
     var nearbyLastSignalAt: Date?
+    @ObservationIgnored var openPeelPairing: (@MainActor @Sendable () -> Void)?
     var launchAtLoginEnabled = false
     var launchAtLoginMessage: String?
     var lidIsClosed: Bool?
@@ -156,7 +158,11 @@ final class CommandCenterStore {
     @ObservationIgnored private var localSignalSequence: UInt64 = 0
     @ObservationIgnored private var localProgramStartedAt = Date.now
     @ObservationIgnored private var receivedNearbySignals: [String: ReceivedNearbySignal] = [:]
-    @ObservationIgnored private var nearbyService: NearbySidePulseService?
+    @ObservationIgnored private var nearbyService: (any SidePulseSignalServicing)?
+    @ObservationIgnored private var nearbyServiceGeneration = UUID()
+#if PEEL_HOST_INTEGRATION
+    @ObservationIgnored private var trustedSignalServiceInstalled = false
+#endif
     @ObservationIgnored private var nearbyStaleMonitor: Timer?
     @ObservationIgnored private var runtime: NativeAgentRuntime?
     @ObservationIgnored private var agentSignalHistoryLedger = AgentSignalHistoryLedger.load()
@@ -941,33 +947,91 @@ final class CommandCenterStore {
     }
 
     private func startNearbySignalService() {
+        let generation = UUID()
+        nearbyServiceGeneration = generation
+#if PEEL_HOST_INTEGRATION
+        trustedSignalServiceInstalled = false
+#endif
+        let callbacks = nearbySignalCallbacks(for: generation)
         let service = NearbySidePulseService(
             nodeID: nearbyNodeID,
             displayName: localHostDisplayName,
-            onPeers: { [weak self] peers in
-                Task { @MainActor [weak self] in
-                    self?.handleNearbyPeers(peers)
-                }
-            },
-            onSignal: { [weak self] signal in
-                Task { @MainActor [weak self] in
-                    self?.handleNearbySignal(signal)
-                }
-            },
-            onStatus: { [weak self] status in
-                Task { @MainActor [weak self] in
-                    self?.nearbyStatusMessage = status
-                }
-            },
-            onSnapshot: { [weak self] snapshot in
-                Task { @MainActor [weak self] in
-                    self?.nearbyServiceSnapshot = snapshot
-                }
-            }
+            onPeers: callbacks.peers,
+            onSignal: callbacks.signal,
+            onStatus: callbacks.status,
+            onSnapshot: callbacks.snapshot
         )
         nearbyService = service
         configureNearbySignalService()
         publishLocalSignal()
+    }
+
+#if PEEL_HOST_INTEGRATION
+    /// Replaces the local-only placeholder with the authenticated Host-owned
+    /// service. The factory is the only path that unlocks cross-device config.
+    func installTrustedSignalService(
+        factory: @escaping TrustedSidePulseSignalServiceFactory
+    ) {
+        let generation = UUID()
+        nearbyServiceGeneration = generation
+        trustedSignalServiceInstalled = false
+
+        nearbyService?.stop()
+        nearbyService = nil
+        nearbyPeers = []
+        receivedNearbySignals.removeAll(keepingCapacity: true)
+        nearbyLastSignalAt = nil
+        nearbyServiceSnapshot = .localOnly
+        nearbyStatusMessage = "Nearby network is off"
+        refreshRoutedOutput()
+
+        let callbacks = nearbySignalCallbacks(for: generation)
+        let service = factory(
+            nearbyNodeID,
+            localHostDisplayName,
+            callbacks.peers,
+            callbacks.signal,
+            callbacks.status,
+            callbacks.snapshot
+        )
+        nearbyService = service
+        trustedSignalServiceInstalled = true
+        configureNearbySignalService()
+        publishLocalSignal()
+    }
+#endif
+
+    private func nearbySignalCallbacks(for generation: UUID) -> (
+        peers: NearbySidePulseService.PeerHandler,
+        signal: NearbySidePulseService.SignalHandler,
+        status: NearbySidePulseService.StatusHandler,
+        snapshot: NearbySidePulseService.SnapshotHandler
+    ) {
+        let peers: NearbySidePulseService.PeerHandler = { [weak self] peers in
+            Task { @MainActor [weak self] in
+                guard let self, self.nearbyServiceGeneration == generation else { return }
+                self.handleNearbyPeers(peers)
+            }
+        }
+        let signal: NearbySidePulseService.SignalHandler = { [weak self] signal in
+            Task { @MainActor [weak self] in
+                guard let self, self.nearbyServiceGeneration == generation else { return }
+                self.handleNearbySignal(signal)
+            }
+        }
+        let status: NearbySidePulseService.StatusHandler = { [weak self] status in
+            Task { @MainActor [weak self] in
+                guard let self, self.nearbyServiceGeneration == generation else { return }
+                self.nearbyStatusMessage = status
+            }
+        }
+        let snapshot: NearbySidePulseService.SnapshotHandler = { [weak self] snapshot in
+            Task { @MainActor [weak self] in
+                guard let self, self.nearbyServiceGeneration == generation else { return }
+                self.nearbyServiceSnapshot = snapshot
+            }
+        }
+        return (peers: peers, signal: signal, status: status, snapshot: snapshot)
     }
 
     private func configureNearbySignalService() {
@@ -977,12 +1041,10 @@ final class CommandCenterStore {
 
     private var nearbyServiceConfiguration: NearbySignalServiceConfiguration {
 #if PEEL_HOST_INTEGRATION
-        // Cross-device signals must use the Host's authenticated peer transport.
-        return NearbySignalServiceConfiguration(
-            sharesLocalSignal: false, discoversPeers: false,
-            followedPeerIDs: [], followsAllPeers: false
-        )
-#else
+        // Cross-device signals stay local-only until the Host installs its
+        // authenticated peer transport through installTrustedSignalService.
+        guard trustedSignalServiceInstalled else { return .localOnly }
+#endif
         let sources = [proSignalSource, dotSignalSource]
         return NearbySignalServiceConfiguration(
             sharesLocalSignal: nearbySharingEnabled,
@@ -990,7 +1052,6 @@ final class CommandCenterStore {
             followedPeerIDs: Set(sources.compactMap(\.selectedPeerID)),
             followsAllPeers: sources.contains(.allMacs)
         )
-#endif
     }
 
     private func updateNearbyStaleMonitor() {
@@ -1357,6 +1418,7 @@ final class CommandCenterStore {
     }
 
     private func handleBatteryUpdate(_ state: BatteryState?) {
+        batterySampledAt = state == nil ? nil : .now
         let previousState = batteryState
         if batteryState != state { batteryState = state }
         let chargerConnectionChanged = BatteryState.chargerConnectionChanged(

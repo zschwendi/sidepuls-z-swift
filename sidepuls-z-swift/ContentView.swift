@@ -711,7 +711,10 @@ struct NearbySignalNetworkCard: View {
 
     var body: some View {
 #if PEEL_HOST_INTEGRATION
-        PeelTrustedSignalsCard()
+        VStack(alignment: .leading, spacing: 14) {
+            PeelTrustedSignalsCard(store: store)
+            legacyNetworkBody
+        }
 #else
         legacyNetworkBody
 #endif
