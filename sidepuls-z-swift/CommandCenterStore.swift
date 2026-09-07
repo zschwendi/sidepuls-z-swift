@@ -1,5 +1,8 @@
 import AppKit
 import Foundation
+#if PEEL_HOST_INTEGRATION
+import SwiftUI
+#endif
 import Observation
 import ServiceManagement
 import UniformTypeIdentifiers
@@ -10,7 +13,7 @@ enum CommandCenterSection: String, CaseIterable, Identifiable {
     case usage
 #endif
 #if PEEL_HOST_INTEGRATION
-    case host, mechanic
+    case host, remoteMac, mechanic
 #endif
 
     var id: String { rawValue }
@@ -26,6 +29,7 @@ enum CommandCenterSection: String, CaseIterable, Identifiable {
 #endif
 #if PEEL_HOST_INTEGRATION
         case .host: "Host"
+        case .remoteMac: "Remote Mac"
         case .mechanic: "Mechanic"
 #endif
         }
@@ -43,6 +47,7 @@ enum CommandCenterSection: String, CaseIterable, Identifiable {
 #endif
 #if PEEL_HOST_INTEGRATION
         case .host: "rectangle.on.rectangle"
+        case .remoteMac: "desktopcomputer"
         case .mechanic: "wrench.and.screwdriver"
 #endif
         }
@@ -124,6 +129,11 @@ final class CommandCenterStore {
     private(set) var nearbyServiceSnapshot = NearbySignalServiceSnapshot.localOnly
     var nearbyLastSignalAt: Date?
     @ObservationIgnored var openPeelPairing: (@MainActor @Sendable () -> Void)?
+#if PEEL_HOST_INTEGRATION
+    /// Host-owned compact status content shown in the shared Overview.
+    /// Standalone SidePulse leaves this unset, preserving its original view.
+    var hostOverviewSummary: AnyView?
+#endif
     var launchAtLoginEnabled = false
     var launchAtLoginMessage: String?
     var lidIsClosed: Bool?

@@ -45,6 +45,8 @@ struct ContentView: View {
             Section("Peel") {
                 Label(CommandCenterSection.host.title, systemImage: CommandCenterSection.host.symbol)
                     .tag(CommandCenterSection.host)
+                Label(CommandCenterSection.remoteMac.title, systemImage: CommandCenterSection.remoteMac.symbol)
+                    .tag(CommandCenterSection.remoteMac)
             }
 #endif
             Section {
@@ -91,6 +93,13 @@ struct ContentView: View {
         case .host:
             ScrollView { peelHostContent }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .remoteMac:
+            if let viewer = peel.remoteMacViewer {
+                PeelRemoteMacViewerView(controller: viewer)
+            } else {
+                ContentUnavailableView("Remote Mac", systemImage: "desktopcomputer",
+                    description: Text("Open Host to prepare your paired Mac connections."))
+            }
         case .mechanic:
             PeelMechanicSurface(processSampler: peel.sampler, systemMetrics: peel.systemMetrics,
                                 presentation: .controlPanel)
@@ -115,6 +124,11 @@ struct OverviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 CommandCenterHero(store: store)
+#if PEEL_HOST_INTEGRATION
+                if let hostOverviewSummary = store.hostOverviewSummary {
+                    hostOverviewSummary
+                }
+#endif
                 OverviewSignalRoutesView(store: store)
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 16) {

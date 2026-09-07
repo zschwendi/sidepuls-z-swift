@@ -205,7 +205,7 @@ final class SidePulseMenuBarController: NSObject {
         guard !hasUnifiedPresentation, let button = statusItem.button else { return }
         hasUnifiedPresentation = true
         statusItem.autosaveName = "PeelHostStatusItem"
-        button.setAccessibilityLabel("Peel AI: Host, SidePulse, usage and system status")
+        button.setAccessibilityLabel("Peel Host: SidePulse, usage and system status")
         let hostingController = NSHostingController(rootView: menu)
         hostingController.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hostingController
@@ -214,7 +214,7 @@ final class SidePulseMenuBarController: NSObject {
         iconView.removeFromSuperview()
         let brand = NSImageView()
         brand.image = NSImage(named: "PeelHostMenuBarIcon_66x66")
-            ?? NSImage(systemSymbolName: "rectangle.on.rectangle", accessibilityDescription: "Peel AI")
+            ?? NSImage(systemSymbolName: "rectangle.on.rectangle", accessibilityDescription: "Peel Host")
         brand.image?.isTemplate = true
         brand.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -278,7 +278,7 @@ final class SidePulseMenuBarController: NSObject {
 
     private func refreshIconSource() {
 #if PEEL_HOST_INTEGRATION
-        notchDisplay.setIslandContentHeight(hasUnifiedPresentation ? 360 : NotchIslandView.contentHeight(agentCount: store.notchDrivingAgents.count))
+        notchDisplay.setIslandContentHeight(hasUnifiedPresentation ? 480 : NotchIslandView.contentHeight(agentCount: store.notchDrivingAgents.count))
         refreshUnifiedBarSize()
 #else
         notchDisplay.setIslandContentHeight(NotchIslandView.contentHeight(agentCount: store.notchDrivingAgents.count))
