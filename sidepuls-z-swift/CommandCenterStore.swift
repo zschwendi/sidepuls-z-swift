@@ -133,6 +133,10 @@ final class CommandCenterStore {
     /// Host-owned compact status content shown in the shared Overview.
     /// Standalone SidePulse leaves this unset, preserving its original view.
     var hostOverviewSummary: AnyView?
+
+    /// Optional host-owned pressure signal. Nil keeps the original SidePulse
+    /// routing and hardware output unchanged.
+    private(set) var systemPressureIndicator: SidePulseSystemPressureIndicator?
 #endif
     var launchAtLoginEnabled = false
     var launchAtLoginMessage: String?
@@ -202,6 +206,11 @@ final class CommandCenterStore {
     @ObservationIgnored private var utilityPreview: (pro: String, dot: String, origin: Date)?
     @ObservationIgnored private var utilityPreviewReset: Timer?
     @ObservationIgnored private var utilityTerminationObserver: NSObjectProtocol?
+#if PEEL_HOST_INTEGRATION
+    @ObservationIgnored private var systemPressureStartedAt = Date.now
+#endif
+    @ObservationIgnored private var lastProSystemPressureWasActive = false
+    @ObservationIgnored private var lastDotSystemPressureWasActive = false
 
     init() {
 #if PEEL_WORKSPACE
@@ -291,7 +300,10 @@ final class CommandCenterStore {
             : routedProScene
         let preview = device.kind == .dot ? utilityPreview?.dot : utilityPreview?.pro
         let utility = device.kind == .dot ? utilityDotProgram : utilityProProgram
-        let underlyingProgram = preview ?? (device.connected ? device.sourceProgram : utility ?? routedScene.program)
+        let pressure = systemPressureProgram(for: device.kind)
+        let underlyingProgram = preview
+            ?? pressure
+            ?? (device.connected ? device.sourceProgram : utility ?? routedScene.program)
         let program = flashlightEnabled
             ? FlashlightLighting.applying(
                 to: underlyingProgram,
@@ -306,6 +318,9 @@ final class CommandCenterStore {
 
     var softwareDisplayClockOrigin: Date? {
         if let preview = utilityPreview { return preview.origin }
+#if PEEL_HOST_INTEGRATION
+        if systemPressureProgram(for: device.kind) != nil { return systemPressureStartedAt }
+#endif
         if device.connected { return device.lastWrite }
         if displayedUtilityMode != .agents { return utilityClockOrigin }
         return device.kind == .dot ? routedDotClockOrigin : routedProClockOrigin
@@ -316,9 +331,45 @@ final class CommandCenterStore {
     }
 
     private var notchUsesNearbySignal: Bool {
-        let source = device.kind == .dot ? routedDotSourceNodeID : routedProSourceNodeID
+        usesNearbySignal(for: device.kind)
+    }
+
+    private func usesNearbySignal(for kind: SidePulseDeviceKind) -> Bool {
+        let source = kind == .dot ? routedDotSourceNodeID : routedProSourceNodeID
         return source != nil && source != nearbyNodeID
     }
+
+#if PEEL_HOST_INTEGRATION
+    private func canUseSystemPressureIndicator(for kind: SidePulseDeviceKind) -> Bool {
+        guard systemPressureIndicator != nil,
+              outputPowerIsOn,
+              !flashlightEnabled,
+              utilityPreview == nil,
+              displayedUtilityMode == .agents,
+              !hasLocalVisibleActivity,
+              !usesNearbySignal(for: kind)
+        else { return false }
+        return true
+    }
+
+    private func activeSystemPressureIndicator(for kind: SidePulseDeviceKind) -> SidePulseSystemPressureIndicator? {
+        guard canUseSystemPressureIndicator(for: kind) else { return nil }
+        return systemPressureIndicator
+    }
+
+    private func systemPressureProgram(for kind: SidePulseDeviceKind) -> String? {
+        guard let indicator = activeSystemPressureIndicator(for: kind)
+        else { return nil }
+        return SystemLightingScenes.systemPressure(
+            indicator: indicator,
+            ledCount: kind.ledCount
+        ).program
+    }
+#else
+    private func systemPressureProgram(for _: SidePulseDeviceKind) -> String? {
+        nil
+    }
+#endif
 
     var notchDrivingAgents: [AgentSession] {
         guard outputPowerIsOn, displayedUtilityMode == .agents,
@@ -334,6 +385,9 @@ final class CommandCenterStore {
         if utilityPreview != nil { return "Lighting preview" }
         if let utilityStatusTitle { return utilityStatusTitle }
         if notchUsesNearbySignal { return routedSignalSourceName(for: device.kind) }
+#if PEEL_HOST_INTEGRATION
+        if let indicator = activeSystemPressureIndicator(for: device.kind) { return indicator.title }
+#endif
         if notchDrivingAgents.isEmpty { return "SidePulse" }
         return agentDisplayMode == .simple ? aggregateState.title : "Live agents"
     }
@@ -344,6 +398,9 @@ final class CommandCenterStore {
         if utilityPreview != nil { return "Previewing a lighting style." }
         if displayedUtilityMode != .agents { return utilityStatusDetail }
         if notchUsesNearbySignal { return "Showing a signal from your nearby Mac." }
+#if PEEL_HOST_INTEGRATION
+        if let indicator = activeSystemPressureIndicator(for: device.kind) { return indicator.detail }
+#endif
         if notchDrivingAgents.isEmpty { return "No agent is driving the signal right now." }
         return agentDisplayMode == .simple ? "Driving the current signal" : "Shown on the array"
     }
@@ -445,6 +502,16 @@ final class CommandCenterStore {
         softwareDisplayChangeHandler = handler
         handler?()
     }
+
+#if PEEL_HOST_INTEGRATION
+    func setSystemPressureIndicator(_ value: SidePulseSystemPressureIndicator?) {
+        guard systemPressureIndicator != value else { return }
+        systemPressureIndicator = value
+        systemPressureStartedAt = .now
+        syncHardwareOutput()
+        notifySoftwareDisplayChanged()
+    }
+#endif
 
     func setMenuBarVisibilityMode(_ mode: MenuBarVisibilityMode) {
         menuBarVisibilityMode = mode
@@ -1502,26 +1569,30 @@ final class CommandCenterStore {
         let currentDotStates = Dictionary(uniqueKeysWithValues: routedDotScene.placementsTopToBottom.map {
             ($0.agent.id, $0.agent.state)
         })
+        let pressurePro = systemPressureProgram(for: .pro)
+        let pressureDot = systemPressureProgram(for: .dot)
         let proTiming = flashlightEnabled || displayedUtilityMode != .agents || interruptsPreview
+            || pressurePro != nil || lastProSystemPressureWasActive
             ? HardwareUpdateTiming.immediate
             : hardwareTiming(from: lastProOutputStates, to: currentProStates)
         let dotTiming = flashlightEnabled || displayedUtilityMode != .agents || interruptsPreview
+            || pressureDot != nil || lastDotSystemPressureWasActive
             ? HardwareUpdateTiming.immediate
             : hardwareTiming(from: lastDotOutputStates, to: currentDotStates)
         let proProgram = flashlightEnabled
             ? FlashlightLighting.applying(
-                to: utilityProProgram ?? routedProScene.program,
+                to: utilityProProgram ?? pressurePro ?? routedProScene.program,
                 mode: flashlightMode,
                 ledCount: SidePulseDeviceKind.pro.ledCount
             )
-            : utilityProProgram ?? routedProScene.program
+            : utilityProProgram ?? pressurePro ?? routedProScene.program
         let dotProgram = flashlightEnabled
             ? FlashlightLighting.applying(
-                to: utilityDotProgram ?? routedDotScene.program,
+                to: utilityDotProgram ?? pressureDot ?? routedDotScene.program,
                 mode: flashlightMode,
                 ledCount: SidePulseDeviceKind.dot.ledCount
             )
-            : utilityDotProgram ?? routedDotScene.program
+            : utilityDotProgram ?? pressureDot ?? routedDotScene.program
         let brightnessScale = flashlightEnabled ? 1 : universalBrightness
         let proCalibration = flashlightEnabled ? SidePulseOutputCalibration.flashlight : proOutputCalibration
         let dotCalibration = flashlightEnabled ? SidePulseOutputCalibration.flashlight : dotOutputCalibration
@@ -1543,6 +1614,8 @@ final class CommandCenterStore {
             timing: flashlightEnabled ? .immediate : dotHardwareTiming(from: dotTiming),
             interruptsPreview: interruptsPreview
         )
+        lastProSystemPressureWasActive = pressurePro != nil
+        lastDotSystemPressureWasActive = pressureDot != nil
         lastProOutputStates = currentProStates
         lastDotOutputStates = currentDotStates
     }

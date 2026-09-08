@@ -693,7 +693,14 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Menu Bar Indicators")
                                     .font(.headline)
-                                PeelMenuBarIndicatorPreferences(usage: peel.usage, appLimit: $appLimit)
+                                PeelMenuBarIndicatorPreferences(
+                                    usage: peel.usage,
+                                    appLimit: $appLimit,
+                                    systemAlertsOnIdleIndicators: Binding(
+                                        get: { peel.systemAlertsOnIdleIndicators },
+                                        set: { peel.setSystemAlertsOnIdleIndicators($0) }
+                                    )
+                                )
                             }
 #endif
                         }

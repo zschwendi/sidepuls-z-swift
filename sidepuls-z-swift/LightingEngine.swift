@@ -738,6 +738,29 @@ enum SystemLightingScenes {
         )
     }
 
+#if PEEL_HOST_INTEGRATION
+    static func systemPressure(
+        indicator: SidePulseSystemPressureIndicator,
+        ledCount: Int
+    ) -> TimedLightingScene {
+        let count = max(1, min(8, ledCount))
+        let pulse = (0..<count)
+            .map { "\($0):\(indicator.colorHex) \(indicator.cycleMilliseconds)ms pulse" }
+            .joined(separator: ";")
+        let program = [
+            "brightness 255",
+            "off",
+            pulse,
+            "repeat",
+        ].joined(separator: "\n")
+        precondition(program.utf8.count <= 512, "System pressure exceeds the firmware limit")
+        return TimedLightingScene(
+            program: program,
+            duration: Double(indicator.cycleMilliseconds) / 1_000
+        )
+    }
+#endif
+
     private static func statusScene(
         chargeFraction: Double,
         ledCount: Int,
