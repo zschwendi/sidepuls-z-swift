@@ -661,6 +661,10 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
 struct SettingsView: View {
     @Bindable var store: CommandCenterStore
     @State private var selectedPane = SettingsPane.general
+#if PEEL_HOST_INTEGRATION
+    @Environment(PeelUnifiedModel.self) private var peel
+    @AppStorage("peel.bar.appLimit") private var appLimit = 3
+#endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -684,6 +688,14 @@ struct SettingsView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
                             SignalModeControl(store: store)
+#if PEEL_HOST_INTEGRATION
+                            Divider()
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Menu Bar Indicators")
+                                    .font(.headline)
+                                PeelMenuBarIndicatorPreferences(usage: peel.usage, appLimit: $appLimit)
+                            }
+#endif
                         }
                             .frame(maxWidth: 620, alignment: .leading)
                             .frame(maxWidth: .infinity, alignment: .leading)

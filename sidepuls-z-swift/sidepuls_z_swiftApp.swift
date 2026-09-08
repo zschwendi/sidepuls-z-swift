@@ -417,6 +417,19 @@ struct SidePulseMenuBarView: View {
     @Bindable var store: CommandCenterStore
     let openAgent: (AgentSession) -> Void
     let openCommandCenter: () -> Void
+    let openSettings: (() -> Void)?
+
+    init(
+        store: CommandCenterStore,
+        openAgent: @escaping (AgentSession) -> Void,
+        openCommandCenter: @escaping () -> Void,
+        openSettings: (() -> Void)? = nil
+    ) {
+        self.store = store
+        self.openAgent = openAgent
+        self.openCommandCenter = openCommandCenter
+        self.openSettings = openSettings
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -428,7 +441,11 @@ struct SidePulseMenuBarView: View {
                     .foregroundStyle(.secondary)
             }
 
-            UtilityControlsView(store: store, compact: true, openSettings: openCommandCenter)
+            UtilityControlsView(
+                store: store,
+                compact: true,
+                openSettings: openSettings ?? openCommandCenter
+            )
                 .padding(3)
                 .glassEffect(.regular, in: .capsule)
 
