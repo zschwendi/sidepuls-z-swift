@@ -48,12 +48,20 @@ struct ContentView: View {
                 Label(CommandCenterSection.remoteMac.title, systemImage: CommandCenterSection.remoteMac.symbol)
                     .tag(CommandCenterSection.remoteMac)
             }
+
+            Section("Agents") {
+                Label(CommandCenterSection.agents.title, systemImage: CommandCenterSection.agents.symbol)
+                    .tag(CommandCenterSection.agents)
+            }
+
 #endif
             Section {
                 Label(CommandCenterSection.overview.title, systemImage: CommandCenterSection.overview.symbol)
                     .tag(CommandCenterSection.overview)
+#if !PEEL_HOST_INTEGRATION
                 Label(CommandCenterSection.agents.title, systemImage: CommandCenterSection.agents.symbol)
                     .tag(CommandCenterSection.agents)
+#endif
 #if PEEL_WORKSPACE && !PEEL_HOST_INTEGRATION
                 Label(CommandCenterSection.usage.title, systemImage: CommandCenterSection.usage.symbol)
                     .tag(CommandCenterSection.usage)
@@ -62,18 +70,30 @@ struct ContentView: View {
                     .tag(CommandCenterSection.lighting)
                 Label(CommandCenterSection.hardware.title, systemImage: CommandCenterSection.hardware.symbol)
                     .tag(CommandCenterSection.hardware)
+            } header: {
+#if PEEL_HOST_INTEGRATION
+                Text("SidePulse")
+#endif
             }
 #if PEEL_HOST_INTEGRATION
-            Section("Usage & System") {
-                Label(CommandCenterSection.usage.title, systemImage: CommandCenterSection.usage.symbol)
-                    .tag(CommandCenterSection.usage)
+            Section("App Mechanic") {
                 Label(CommandCenterSection.mechanic.title, systemImage: CommandCenterSection.mechanic.symbol)
                     .tag(CommandCenterSection.mechanic)
             }
+
+            Section("Usage") {
+                Label(CommandCenterSection.usage.title, systemImage: CommandCenterSection.usage.symbol)
+                    .tag(CommandCenterSection.usage)
+            }
+
 #endif
             Section {
                 Label(CommandCenterSection.settings.title, systemImage: CommandCenterSection.settings.symbol)
                     .tag(CommandCenterSection.settings)
+            } header: {
+#if PEEL_HOST_INTEGRATION
+                Text("Settings")
+#endif
             }
         }
     }
