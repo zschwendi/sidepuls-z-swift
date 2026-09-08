@@ -181,6 +181,10 @@ enum AgentTimelinePolicy {
 final class NativeAgentRuntime: @unchecked Sendable {
     typealias UpdateHandler = @Sendable ([AgentSession], String, [AgentIntegrationStatus]) -> Void
     private static let transcriptTailBytes: UInt64 = 196_608
+    // Hook and IPC callbacks publish immediately. These intervals only govern
+    // the filesystem fallback and stale-session sweep while the app is idle.
+    private static let timerInterval: TimeInterval = 1
+    private static let discoveryInterval: TimeInterval = 1.5
     private static let grokBotBase32Values = Dictionary(
         uniqueKeysWithValues: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".enumerated().map {
             ($0.element, $0.offset)
@@ -326,12 +330,16 @@ final class NativeAgentRuntime: @unchecked Sendable {
         }
 
         let source = DispatchSource.makeTimerSource(queue: queue)
-        source.schedule(deadline: .now() + 0.25, repeating: 0.5, leeway: .milliseconds(50))
+        source.schedule(
+            deadline: .now() + 0.25,
+            repeating: Self.timerInterval,
+            leeway: .milliseconds(100)
+        )
         source.setEventHandler { [weak self] in
             guard let self else { return }
             if !ownsSocket { loadLatestStateLocked() }
             let now = Date.now
-            if now.timeIntervalSince(lastDiscoveryScan) >= 0.75 {
+            if now.timeIntervalSince(lastDiscoveryScan) >= Self.discoveryInterval {
                 discoverCodexSessionsLocked(now: now)
                 discoverGrokBotSessionsLocked(now: now)
                 pruneStaleHookSessionsLocked(now: now)

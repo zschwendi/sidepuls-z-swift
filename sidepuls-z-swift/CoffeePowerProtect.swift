@@ -37,9 +37,17 @@ final class CoffeePowerProtect {
         return connection != nil
     }
 
+    private static var expectedBundleIdentifier: String {
+#if PEEL_HOST_INTEGRATION
+        "com.zephyrstudiosllc.Peel-Host"
+#else
+        "com.zephyrstudiosllc.sidepulse-z"
+#endif
+    }
+
     private func launch() {
         guard let executable = Bundle.main.executableURL,
-              Bundle.main.bundleIdentifier == "com.zephyrstudiosllc.sidepulse-z",
+              Bundle.main.bundleIdentifier == Self.expectedBundleIdentifier,
               Bundle.main.bundleURL.pathExtension == "app" else {
             onStatus("Closed-lid companion is unavailable", true)
             return

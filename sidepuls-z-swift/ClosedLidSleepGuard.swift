@@ -451,7 +451,13 @@ final class ClosedLidSleepGuard {
     typealias StatusHandler = @MainActor @Sendable (String) -> Void
 
     private static let guardianArgument = "--sidepulse-coffee-guardian"
-    private static let expectedBundleIdentifier = "com.zephyrstudiosllc.sidepulse-z"
+    private static var expectedBundleIdentifier: String {
+#if PEEL_HOST_INTEGRATION
+        "com.zephyrstudiosllc.Peel-Host"
+#else
+        "com.zephyrstudiosllc.sidepulse-z"
+#endif
+    }
 
     private let onStatus: StatusHandler
     private let executableOverride: URL?
