@@ -153,7 +153,11 @@ final class CommandCenterStore {
             syncHardwareOutput()
         }
     }
+#if PEEL_HOST_INTEGRATION
+    var runtimeMessage = "Waiting for live agent activity"
+#else
     var runtimeMessage = "Preview data — native event runtime not connected yet"
+#endif
 
     private var proAllocator = StableSlotAllocator()
     private var dotAllocator = StableSlotAllocator()
@@ -187,7 +191,11 @@ final class CommandCenterStore {
     @ObservationIgnored private var lidMonitor: LidStateMonitor?
     @ObservationIgnored private var batteryMonitor: BatteryStateMonitor?
     @ObservationIgnored private var lastLowBatteryAlertAt: Date?
+#if PEEL_HOST_INTEGRATION
+    @ObservationIgnored private var isShowingPreviewData = false
+#else
     @ObservationIgnored private var isShowingPreviewData = true
+#endif
     @ObservationIgnored private var lastProOutputStates: [String: AgentState] = [:]
     @ObservationIgnored private var lastDotOutputStates: [String: AgentState] = [:]
     @ObservationIgnored private var profileSelectionObserver: NSObjectProtocol?
@@ -232,6 +240,10 @@ final class CommandCenterStore {
             ProfileLibrary.setDefaultProfileID(initialProfile.id)
         }
 
+#if PEEL_HOST_INTEGRATION
+        // Unified Host must render only sessions discovered by NativeAgentRuntime.
+        agents = []
+#else
         let now = Date.now
         agents = [
             AgentSession(
@@ -274,6 +286,7 @@ final class CommandCenterStore {
                 message: nil
             ),
         ]
+#endif
         agentSignalHistory = agentSignalHistoryLedger.entries
         if (proSignalSource.needsNearbySignals || dotSignalSource.needsNearbySignals),
            !nearbyDiscoveryEnabled {
