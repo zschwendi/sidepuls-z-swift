@@ -7,33 +7,55 @@ import Observation
 import ServiceManagement
 import UniformTypeIdentifiers
 
-enum CommandCenterSection: String, CaseIterable, Identifiable {
+enum CommandCenterSection: Hashable, Identifiable {
     case overview, lighting, agents, hardware, settings
 #if PEEL_WORKSPACE
     case usage
+    case usageProvider(String)
 #endif
 #if PEEL_HOST_INTEGRATION
-    case host, remoteMac, mechanic
+    case host, hostSettings, remoteMac, mechanic, mechanicAlerts, mechanicSettings, usageSettings
 #endif
 
-    var id: String { rawValue }
+    var id: Self { self }
     var title: String {
         switch self {
         case .overview: "Overview"
         case .lighting: "Lighting"
         case .agents: "Agent Hub"
         case .hardware: "Devices & Macs"
-        case .settings: "Preferences"
+        case .settings:
+#if PEEL_HOST_INTEGRATION
+            "Notch Pulse Settings"
+#else
+            "Preferences"
+#endif
 #if PEEL_WORKSPACE
-        case .usage: "Usage"
+        case .usage: "Usage Limits"
+        case .usageProvider(let providerID): providerID.capitalized
 #endif
 #if PEEL_HOST_INTEGRATION
-        case .host: "Host"
+        case .host: "Peel Pro"
+        case .hostSettings: "Peel Pro Settings"
         case .remoteMac: "Remote Mac"
-        case .mechanic: "Mechanic"
+        case .mechanic: "App Mechanic"
+        case .mechanicAlerts: "App Mechanic Alerts"
+        case .mechanicSettings: "App Mechanic Settings"
+        case .usageSettings: "Usage Limits Settings"
 #endif
         }
     }
+
+#if PEEL_HOST_INTEGRATION
+    var settingsSection: CommandCenterSection {
+        switch self {
+        case .host, .remoteMac, .hostSettings: .hostSettings
+        case .usage, .usageProvider, .usageSettings: .usageSettings
+        case .mechanic, .mechanicAlerts, .mechanicSettings: .mechanicSettings
+        case .overview, .lighting, .agents, .hardware, .settings: .settings
+        }
+    }
+#endif
 
     var symbol: String {
         switch self {
@@ -43,10 +65,12 @@ enum CommandCenterSection: String, CaseIterable, Identifiable {
         case .hardware: "point.3.connected.trianglepath.dotted"
         case .settings: "gearshape.fill"
 #if PEEL_WORKSPACE
-        case .usage: "gauge.with.dots.needle.50percent"
+        case .usage, .usageProvider: "gauge.with.dots.needle.50percent"
 #endif
 #if PEEL_HOST_INTEGRATION
         case .host: "rectangle.on.rectangle"
+        case .hostSettings, .mechanicSettings, .usageSettings: "gearshape"
+        case .mechanicAlerts: "bell.badge"
         case .remoteMac: "desktopcomputer"
         case .mechanic: "wrench.and.screwdriver"
 #endif

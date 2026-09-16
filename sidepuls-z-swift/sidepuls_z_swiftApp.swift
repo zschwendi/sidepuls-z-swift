@@ -239,6 +239,21 @@ final class SidePulseMenuBarController: NSObject {
         refreshIconSource()
     }
 
+    func switchToUnifiedMenuBar() {
+        UserDefaults.standard.set(true, forKey: "showMenuBarIcon")
+        store.setNotchEnabled(false)
+        refreshStatusItemVisibility()
+        guard let button = statusItem.button else { return }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    func switchToUnifiedNotch() {
+        popover.performClose(nil)
+        store.setNotchEnabled(true)
+        notchDisplay.setExpanded(true)
+    }
+
     private func refreshUnifiedBarSize() {
         guard hasUnifiedPresentation else { return }
         let defaults = UserDefaults.standard

@@ -6,6 +6,8 @@ struct ContentView: View {
 #if PEEL_HOST_INTEGRATION
     @Environment(PeelUnifiedModel.self) private var peel
     var peelHostContent: AnyView? = nil
+    var peelHostSettingsContent: AnyView? = nil
+    @State private var notchOverviewTab = 0
     private var usageStore: PeelUsageStore { peel.usage }
 #elseif PEEL_WORKSPACE
     @State private var usageStore = PeelUsageStore()
@@ -20,7 +22,7 @@ struct ContentView: View {
                 CommandCenterBackground()
                 detail.padding(18)
             }
-            .navigationTitle(store.selectedSection.title)
+            .navigationTitle(pageTitle)
             .toolbar { toolbar }
         }
         .frame(minWidth: 880, minHeight: 580)
@@ -33,86 +35,107 @@ struct ContentView: View {
 #endif
             }
         }
+        .onChange(of: usageStore.providers.map(\.id)) { _, ids in
+            if case .usageProvider(let id) = store.selectedSection, !ids.contains(id) {
+                store.selectedSection = .usage
+            }
+        }
 #if !PEEL_HOST_INTEGRATION
         .onDisappear { usageStore.stopPresentation() }
 #endif
 #endif
     }
 
+    private var pageTitle: String {
+#if PEEL_WORKSPACE
+        if case .usageProvider(let id) = store.selectedSection {
+            return usageStore.providers.first(where: { $0.id == id })?.name ?? "Usage Limits"
+        }
+#endif
+        return store.selectedSection.title
+    }
+
     private var sidebar: some View {
         List(selection: $store.selectedSection) {
 #if PEEL_HOST_INTEGRATION
-            Section("Peel") {
-                Label(CommandCenterSection.host.title, systemImage: CommandCenterSection.host.symbol)
-                    .tag(CommandCenterSection.host)
-                Label(CommandCenterSection.remoteMac.title, systemImage: CommandCenterSection.remoteMac.symbol)
-                    .tag(CommandCenterSection.remoteMac)
+            Section("Peel Pro") {
+                sidebarLink(.host, title: "Host")
+                sidebarLink(.remoteMac)
+                sidebarLink(.hostSettings, title: "Settings")
             }
-
-            Section("Agents") {
-                Label(CommandCenterSection.agents.title, systemImage: CommandCenterSection.agents.symbol)
-                    .tag(CommandCenterSection.agents)
+            Section("Notch Pulse") {
+                sidebarLink(.overview)
+                sidebarLink(.agents)
+                sidebarLink(.hardware)
+                sidebarLink(.settings, title: "Settings")
             }
-
-#endif
-            Section {
-                Label(CommandCenterSection.overview.title, systemImage: CommandCenterSection.overview.symbol)
-                    .tag(CommandCenterSection.overview)
-#if !PEEL_HOST_INTEGRATION
-                Label(CommandCenterSection.agents.title, systemImage: CommandCenterSection.agents.symbol)
-                    .tag(CommandCenterSection.agents)
-#endif
-#if PEEL_WORKSPACE && !PEEL_HOST_INTEGRATION
-                Label(CommandCenterSection.usage.title, systemImage: CommandCenterSection.usage.symbol)
-                    .tag(CommandCenterSection.usage)
-#endif
-                Label(CommandCenterSection.lighting.title, systemImage: CommandCenterSection.lighting.symbol)
-                    .tag(CommandCenterSection.lighting)
-                Label(CommandCenterSection.hardware.title, systemImage: CommandCenterSection.hardware.symbol)
-                    .tag(CommandCenterSection.hardware)
-            } header: {
-#if PEEL_HOST_INTEGRATION
-                Text("SidePulse")
-#endif
+            Section("Usage Limits") {
+                sidebarLink(.usage, title: "All")
+                ForEach(Array(usageStore.providers.prefix(2))) { provider in
+                    sidebarLink(.usageProvider(provider.id), title: provider.name)
+                }
+                sidebarLink(.usageSettings, title: "Settings")
             }
-#if PEEL_HOST_INTEGRATION
             Section("App Mechanic") {
-                Label(CommandCenterSection.mechanic.title, systemImage: CommandCenterSection.mechanic.symbol)
-                    .tag(CommandCenterSection.mechanic)
+                sidebarLink(.mechanic, title: "Overview")
+                sidebarLink(.mechanicAlerts, title: "Alerts")
+                sidebarLink(.mechanicSettings, title: "Settings")
             }
-
-            Section("Usage") {
-                Label(CommandCenterSection.usage.title, systemImage: CommandCenterSection.usage.symbol)
-                    .tag(CommandCenterSection.usage)
-            }
-
-#endif
+#else
             Section {
-                Label(CommandCenterSection.settings.title, systemImage: CommandCenterSection.settings.symbol)
-                    .tag(CommandCenterSection.settings)
-            } header: {
-#if PEEL_HOST_INTEGRATION
-                Text("Settings")
+                sidebarLink(.overview)
+                sidebarLink(.agents)
+#if PEEL_WORKSPACE
+                sidebarLink(.usage)
 #endif
+                sidebarLink(.lighting)
+                sidebarLink(.hardware)
             }
+            Section { sidebarLink(.settings) }
+#endif
         }
+    }
+
+    private func sidebarLink(_ section: CommandCenterSection, title: String? = nil) -> some View {
+        Label(title ?? section.title, systemImage: section.symbol)
+            .accessibilityLabel(title == "Settings" ? section.title : (title ?? section.title))
+            .tag(section)
     }
 
     @ViewBuilder
     private var detail: some View {
         switch store.selectedSection {
-        case .overview: OverviewView(store: store)
+        case .overview:
+#if PEEL_HOST_INTEGRATION
+            VStack(alignment: .leading, spacing: 16) {
+                Picker("Notch Pulse", selection: $notchOverviewTab) {
+                    Text("Overview").tag(0)
+                    Text("Lighting").tag(1)
+                }
+                .pickerStyle(.segmented)
+                if notchOverviewTab == 0 { OverviewView(store: store) }
+                else { LightingStudioView(store: store) }
+            }
+#else
+            OverviewView(store: store)
+#endif
         case .lighting: LightingStudioView(store: store)
         case .agents: AgentsView(store: store)
         case .hardware: HardwareView(store: store)
         case .settings: SettingsView(store: store)
 #if PEEL_WORKSPACE
         case .usage: PeelUsageView(store: usageStore)
+        case .usageProvider(let providerID): PeelUsageView(store: usageStore, providerID: providerID)
 #endif
 #if PEEL_HOST_INTEGRATION
         case .host:
-            ScrollView { peelHostContent }
+            peelHostContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .hostSettings:
+            peelHostSettingsContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .usageSettings:
+            PeelUsageSettingsView(store: usageStore)
         case .remoteMac:
             if let viewer = peel.remoteMacViewer {
                 PeelRemoteMacViewerView(controller: viewer)
@@ -123,6 +146,13 @@ struct ContentView: View {
         case .mechanic:
             PeelMechanicSurface(processSampler: peel.sampler, systemMetrics: peel.systemMetrics,
                                 presentation: .controlPanel)
+        case .mechanicAlerts:
+            PeelMechanicSurface(processSampler: peel.sampler, systemMetrics: peel.systemMetrics,
+                                presentation: .alerts)
+        case .mechanicSettings:
+            PeelMechanicSurface(processSampler: peel.sampler, systemMetrics: peel.systemMetrics,
+                                presentation: .settings,
+                                openHostSettings: { peel.open(.hostSettings) })
 #endif
         }
     }
@@ -479,6 +509,9 @@ struct CommandCenterHero: View {
 
 struct SignalModeControl: View {
     @Bindable var store: CommandCenterStore
+#if PEEL_HOST_INTEGRATION
+    @Environment(PeelUnifiedModel.self) private var peel
+#endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -597,6 +630,12 @@ struct SignalModeControl: View {
                 .pickerStyle(.menu)
             }
 
+#if PEEL_HOST_INTEGRATION
+            Button("App Startup & Visibility Settings", systemImage: "gearshape") {
+                peel.open(.hostSettings)
+            }
+            .buttonStyle(.link)
+#else
             Toggle("Start at login", isOn: Binding(
                 get: { store.launchAtLoginEnabled },
                 set: { store.setLaunchAtLoginEnabled($0) }
@@ -618,6 +657,7 @@ struct SignalModeControl: View {
                     }
                 }
             }
+#endif
         }
         .padding(20)
         .glassEffect(.regular.tint(.cyan.opacity(0.06)), in: .rect(cornerRadius: 22))
@@ -690,13 +730,13 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {
-                    Text("Preferences").font(.title2.bold())
+                    Text(CommandCenterSection.settings.title).font(.title2.bold())
                     Spacer(minLength: 8)
                     settingsPanePicker
                         .frame(width: 520)
                 }
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Preferences").font(.title2.bold())
+                    Text(CommandCenterSection.settings.title).font(.title2.bold())
                     settingsPanePicker
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -747,7 +787,7 @@ struct SettingsView: View {
     }
 
     private var settingsPanePicker: some View {
-        Picker("Preferences", selection: $selectedPane) {
+        Picker("Settings", selection: $selectedPane) {
             ForEach(SettingsPane.allCases) { pane in
                 Text(pane.title).tag(pane)
             }
@@ -1223,7 +1263,7 @@ struct AgentGridView: View {
                         .foregroundStyle(.cyan)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Ready for your next agent").font(.subheadline.weight(.semibold))
-                        Text("Start or resume a Codex task — SidePulse discovers it automatically.")
+                        Text("Start or resume a task — Notch Pulse discovers supported agents automatically.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -2060,7 +2100,7 @@ struct AgentsView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Agent History")
                     .font(.headline)
-                Text("Recent state and tool changes behind SidePulse signals")
+                Text("Recent agent activity and state changes")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -2183,7 +2223,10 @@ private struct AgentSignalHistoryRow: View {
                 Text(entry.occurredAt, format: .dateTime.month(.abbreviated).day().hour().minute().second())
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
-                Text(entry.occurredAt, style: .relative)
+                // History entries are immutable after insertion. Formatting the
+                // relative label as a String avoids registering a recurring
+                // SwiftUI time update for every retained row.
+                Text(entry.occurredAt.formatted(.relative(presentation: .named)))
                     .font(.system(size: 9, design: .rounded))
                     .foregroundStyle(.tertiary)
             }
@@ -2209,6 +2252,27 @@ private struct AgentTimelineRow: View {
     let allocationLabel: String
 
     private var color: Color { Color(hex: profile.style(for: agent.state).colorHex) }
+
+    private var hasLiveTimestamp: Bool {
+        switch agent.state {
+        case .working, .toolRunning:
+            true
+        case .idle, .waiting, .error, .completed:
+            false
+        }
+    }
+
+    @ViewBuilder
+    private var updatedAtLabel: some View {
+        if hasLiveTimestamp {
+            // Keep the continuously updating label for the active indication.
+            Text(agent.updatedAt, style: .relative)
+        } else {
+            // Waiting, completed, and error rows do not change until a new
+            // event arrives, so they should not keep a time schedule alive.
+            Text(agent.updatedAt.formatted(.relative(presentation: .named)))
+        }
+    }
 
     var body: some View {
         HStack(spacing: 15) {
@@ -2237,7 +2301,7 @@ private struct AgentTimelineRow: View {
                     Text("·")
                     Text(agent.state.title)
                     Text("·")
-                    Text(agent.updatedAt, style: .relative)
+                    updatedAtLabel
                         .monospacedDigit()
                 }
                 .font(.caption)
@@ -2599,7 +2663,7 @@ struct ConnectionsView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Agent Integrations").font(.largeTitle.bold())
-                        Text("Agent integrations that provide live SidePulse status.")
+                        Text("Agent integrations that provide live Notch Pulse status.")
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -2607,12 +2671,14 @@ struct ConnectionsView: View {
                 ForEach(store.integrations) { integration in
                     IntegrationStatusCard(integration: integration)
                 }
+#if !PEEL_HOST_INTEGRATION
                 FeaturePlaceholder(
                     title: "ChatGPT Chats",
                     subtitle: "Waiting for a supported local thinking / finished signal",
                     symbol: "bubble.left.and.bubble.right.fill",
                     badge: "Planned"
                 )
+#endif
                 Spacer()
             }
         }

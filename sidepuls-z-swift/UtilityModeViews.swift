@@ -69,11 +69,11 @@ struct UtilityControlsView: View {
             }
 
             utilityButton(
-                label: "SidePulse Notch",
+                label: "Notch Pulse",
                 symbol: "rectangle.topthird.inset.filled",
                 active: store.notchEnabled,
                 activeColor: .cyan,
-                help: store.notchEnabled ? "Turn off SidePulse Notch" : "Turn on SidePulse Notch"
+                help: store.notchEnabled ? "Turn off Notch Pulse" : "Turn on Notch Pulse"
             ) {
                 store.setNotchEnabled(!store.notchEnabled)
             }
