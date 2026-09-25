@@ -161,12 +161,15 @@ final class SidePulseEjectGuard: @unchecked Sendable {
         process.arguments = ["print", target]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
         do {
             try process.run()
         } catch {
             return false
         }
-        process.waitUntilExit()
+        // waitUntilExit pumps the calling run loop, which can reenter SwiftUI startup.
+        finished.wait()
         return process.terminationStatus == 0
     }
 }

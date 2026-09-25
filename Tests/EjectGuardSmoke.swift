@@ -57,6 +57,15 @@ enum EjectGuardSmoke {
             }
         )
 
+        var reenteredRunLoop = false
+        let pendingStartupWork = Timer(fire: .distantPast, interval: 0, repeats: false) { _ in
+            reenteredRunLoop = true
+        }
+        RunLoop.main.add(pendingStartupWork, forMode: .default)
+        _ = SidePulseEjectGuard.runningExternalHelperExists()
+        pendingStartupWork.invalidate()
+        precondition(!reenteredRunLoop, "Helper detection must not reenter the startup run loop")
+
         let ejectGuard = SidePulseEjectGuard()
         try ejectGuard.start()
         precondition(ejectGuard.isRunning)
