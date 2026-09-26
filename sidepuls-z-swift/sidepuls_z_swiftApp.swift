@@ -205,7 +205,7 @@ final class SidePulseMenuBarController: NSObject {
         guard !hasUnifiedPresentation, let button = statusItem.button else { return }
         hasUnifiedPresentation = true
         statusItem.autosaveName = "PeelHostStatusItem"
-        button.setAccessibilityLabel("Peel Host: SidePulse, usage and system status")
+        button.setAccessibilityLabel("Peel Pro for Mac: SidePulse, usage and system status")
         let hostingController = NSHostingController(rootView: menu)
         hostingController.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hostingController
@@ -214,7 +214,7 @@ final class SidePulseMenuBarController: NSObject {
         iconView.removeFromSuperview()
         let brand = NSImageView()
         brand.image = NSImage(named: "PeelHostMenuBarIcon_66x66")
-            ?? NSImage(systemSymbolName: "rectangle.on.rectangle", accessibilityDescription: "Peel Host")
+            ?? NSImage(systemSymbolName: "rectangle.on.rectangle", accessibilityDescription: "Peel Pro for Mac")
         brand.image?.isTemplate = true
         brand.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -321,7 +321,7 @@ final class SidePulseMenuBarController: NSObject {
         renderedIconStyle = store.menuBarIconStyle
         renderIconFrame()
 #if PEEL_HOST_INTEGRATION
-        let toolTip = "Peel AI · \(store.agents.count) agent sessions · Host, usage and system controls"
+        let toolTip = "Peel Pro for Mac · \(store.agents.count) agent sessions · Host, usage and system controls"
 #else
         let toolTip = "SidePulse · \(store.agents.count) session\(store.agents.count == 1 ? "" : "s")"
 #endif
