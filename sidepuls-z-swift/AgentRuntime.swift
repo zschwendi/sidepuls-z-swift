@@ -201,6 +201,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
     private let codexIPCBridge: CodexIPCBridge
     private let grokBotPersistenceRoot: URL
     private let usesPersistentAppState: Bool
+    private let cloudDiscoveryEnabled: Bool
     private var server: LocalUnixEventServer?
     private var timer: DispatchSourceTimer?
     private var sessions: [String: AgentSession] = [:]
@@ -225,8 +226,9 @@ final class NativeAgentRuntime: @unchecked Sendable {
     private var lastPublishedSignature = ""
     private let onUpdate: UpdateHandler
 
-    init(onUpdate: @escaping UpdateHandler) {
+    init(cloudDiscoveryEnabled: Bool = true, onUpdate: @escaping UpdateHandler) {
         self.onUpdate = onUpdate
+        self.cloudDiscoveryEnabled = cloudDiscoveryEnabled
 
         let environment = ProcessInfo.processInfo.environment
         let resolvedStateRoot: URL
@@ -443,8 +445,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
     }
 
     private func loadLatestStateLocked(force: Bool = false) {
-        let values = try? latestStateURL.resourceValues(forKeys: [.contentModificationDateKey])
-        let modified = values?.contentModificationDate
+        let modified = freshModificationDate(of: latestStateURL)
         if !force, modified == lastLatestModification { return }
         lastLatestModification = modified
 
@@ -480,6 +481,19 @@ final class NativeAgentRuntime: @unchecked Sendable {
             if AgentTimelinePolicy.includes(session) {
                 loaded[status.agentID] = session
             }
+        }
+        // A companion app may own the hook socket while we discover transcripts
+        // ourselves. Its snapshot can lag or omit those sessions entirely. Keep
+        // our newer observations so a reload cannot retract a live agent between
+        // discovery ticks (or lose a retained transcript outside the recent window).
+        let locallyTrackedKeys = discoveredKeys
+            .union(grokBotDiscoveredKeys)
+            .union(cloudKeys)
+            .union(hookEventDates.keys)
+        for key in locallyTrackedKeys {
+            guard let current = sessions[key] else { continue }
+            if let incoming = loaded[key], incoming.updatedAt > current.updatedAt { continue }
+            loaded[key] = current
         }
         sessions = loaded
         publishLocked(force: true)
@@ -564,7 +578,7 @@ final class NativeAgentRuntime: @unchecked Sendable {
             let temporary = latestStateURL.appendingPathExtension("tmp")
             try data.write(to: temporary, options: .atomic)
             _ = try FileManager.default.replaceItemAt(latestStateURL, withItemAt: temporary)
-            lastLatestModification = try? latestStateURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            lastLatestModification = freshModificationDate(of: latestStateURL)
         } catch {
             try? data.write(to: latestStateURL, options: .atomic)
         }
@@ -572,8 +586,14 @@ final class NativeAgentRuntime: @unchecked Sendable {
 }
 
 private extension NativeAgentRuntime {
+    func freshModificationDate(of url: URL) -> Date? {
+        var url = url
+        url.removeAllCachedResourceValues()
+        return try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+
     func refreshCodexCloudLocked(now: Date) {
-        guard !cloudRefreshInFlight else { return }
+        guard cloudDiscoveryEnabled, !cloudRefreshInFlight else { return }
         lastCloudRefresh = now
         guard let executable = codexExecutableURL() else { return }
         cloudRefreshInFlight = true
@@ -1031,28 +1051,21 @@ private extension NativeAgentRuntime {
         let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isRegularFileKey]
         var result: [URL] = []
 
-        for dayOffset in [0, -1] {
-            guard let date = Calendar.current.date(byAdding: .day, value: dayOffset, to: now) else { continue }
-            let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
-            guard let year = components.year, let month = components.month, let day = components.day else { continue }
-            let folder = codexSessionsRoot
-                .appending(path: String(format: "%04d", year), directoryHint: .isDirectory)
-                .appending(path: String(format: "%02d", month), directoryHint: .isDirectory)
-                .appending(path: String(format: "%02d", day), directoryHint: .isDirectory)
-            guard let urls = try? manager.contentsOfDirectory(
-                at: folder,
-                includingPropertiesForKeys: Array(keys),
-                options: [.skipsHiddenFiles]
-            ) else { continue }
-
-            for url in urls where url.pathExtension == "jsonl" {
-                guard let values = try? url.resourceValues(forKeys: keys),
-                      values.isRegularFile == true,
-                      let modified = values.contentModificationDate,
-                      now.timeIntervalSince(modified) <= 15 * 60
-                else { continue }
-                result.append(url)
-            }
+        // Codex keeps a resumed task in its original creation-date folder. Scan
+        // file metadata across the tree; read transcript contents only for recent
+        // activity and sessions already being tracked.
+        guard let urls = manager.enumerator(
+            at: codexSessionsRoot,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
+        for case let url as URL in urls where url.pathExtension == "jsonl" {
+            guard let values = try? url.resourceValues(forKeys: keys),
+                  values.isRegularFile == true,
+                  let modified = values.contentModificationDate,
+                  now.timeIntervalSince(modified) <= 15 * 60
+            else { continue }
+            result.append(url)
         }
         return result
     }
@@ -1119,6 +1132,10 @@ private extension NativeAgentRuntime {
     }
 
     func readCodexTranscript(_ url: URL) -> CodexTranscriptSnapshot? {
+        // Discovery URLs may carry prefetched metadata. A retained URL must check
+        // the current file before deciding that the parsed tail is still valid.
+        var url = url
+        url.removeAllCachedResourceValues()
         guard let values = try? url.resourceValues(
                   forKeys: [.contentModificationDateKey, .fileSizeKey]
               ),
@@ -1294,9 +1311,7 @@ private extension NativeAgentRuntime {
     }
 
     func refreshThreadNamesLocked() -> Bool {
-        let modified = try? codexSessionIndexURL
-            .resourceValues(forKeys: [.contentModificationDateKey])
-            .contentModificationDate
+        let modified = freshModificationDate(of: codexSessionIndexURL)
         guard modified != threadIndexModification,
               let data = try? Data(contentsOf: codexSessionIndexURL)
         else { return false }

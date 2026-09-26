@@ -101,6 +101,16 @@ xcrun swiftc \
 "$test_dir/AgentRuntimeSmoke"
 
 xcrun swiftc \
+    sidepuls-z-swift/CodexIPCBridge.swift \
+    sidepuls-z-swift/LEDProgramRenderer.swift \
+    sidepuls-z-swift/Models.swift \
+    sidepuls-z-swift/AgentSignalHistory.swift \
+    sidepuls-z-swift/AgentRuntime.swift \
+    Tests/AgentDiscoverySmoke.swift \
+    -o "$test_dir/AgentDiscoverySmoke"
+"$test_dir/AgentDiscoverySmoke"
+
+xcrun swiftc \
     sidepuls-z-swift/LEDProgramRenderer.swift \
     sidepuls-z-swift/Models.swift \
     sidepuls-z-swift/NearbySignalModels.swift \

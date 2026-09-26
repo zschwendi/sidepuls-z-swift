@@ -98,7 +98,7 @@ enum AgentRuntimeSmoke {
 
         let probe = RuntimeProbe()
         let detected = DispatchSemaphore(value: 0)
-        let runtime = NativeAgentRuntime { agents, _, integrations in
+        let runtime = NativeAgentRuntime(cloudDiscoveryEnabled: false) { agents, _, integrations in
             probe.record(agents: agents, integrations: integrations)
             let states = Dictionary(uniqueKeysWithValues: agents.map { ($0.sessionID, $0.state) })
             if states[completedID] == .completed,
